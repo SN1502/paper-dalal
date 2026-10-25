@@ -1,11 +1,14 @@
 name: Build Android APK
 
-# Run it from the Actions tab ("Run workflow"), or push a tag like v1.0.0
-# to also attach the APK to a GitHub Release you can download on your phone.
+# Every push to main (and any v* tag) builds a release APK and publishes it as a
+# GitHub Release, so it can be downloaded and installed straight from a phone.
+# It can also be started by hand from the Actions tab ("Run workflow").
 on:
   workflow_dispatch:
   push:
+    branches: [main]
     tags: ['v*']
+    paths-ignore: ['**.md']
 
 permissions:
   contents: write
@@ -20,6 +23,15 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+
+      - name: Pick the release version
+        id: ver
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=v1.0.$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: actions/setup-node@v4
         with:
@@ -51,7 +63,7 @@ jobs:
         run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
 
       - name: Name the APK
-        run: cp android/app/build/outputs/apk/release/app-release.apk PaperDalal-${{ github.ref_name }}.apk
+        run: cp android/app/build/outputs/apk/release/app-release.apk "PaperDalal-${{ steps.ver.outputs.tag }}.apk"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -59,8 +71,14 @@ jobs:
           path: PaperDalal-*.apk
           retention-days: 30
 
-      - name: Attach to release
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: PaperDalal ${{ steps.ver.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          body: |
+            Download the APK below on your Android phone and open it to install.
+            Android may ask you to allow installs from your browser or file manager.
           files: PaperDalal-*.apk
+          make_latest: true

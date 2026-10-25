@@ -34,7 +34,7 @@ Expo Go only supports the latest Expo SDK. If Expo Go says the project's SDK is 
 
 ## Install it as a real app (Android APK)
 
-**With GitHub Actions (no Android Studio needed).** Push this folder to a GitHub repository, open the **Actions** tab, choose **Build Android APK** and click **Run workflow**. In about 15 minutes, download `PaperDalal-apk` from the run and install it on your phone (allow installs from your browser or file manager when asked). Pushing a tag such as `v1.0.0` also attaches the APK to a GitHub Release, which is easy to download straight on the phone.
+**With GitHub Actions (no Android Studio needed).** Every push to `main` builds a release APK and publishes it under this repo's **Releases** (as `v1.0.<build number>`), so you can download and install it straight from your phone. Allow installs from your browser or file manager when Android asks. You can also start a build by hand from the **Actions** tab (**Build Android APK → Run workflow**); a build takes about 15 minutes.
 
 **With EAS Build (Expo's cloud).** `npx eas-cli@latest build -p android --profile preview` gives you a download link for an APK. Needs a free Expo account.
 
