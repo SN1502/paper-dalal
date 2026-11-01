@@ -1,0 +1,68 @@
+11-01 07:13:55.737 D/AndroidRuntime( 3611): >>>>>> START com.android.internal.os.RuntimeInit uid 2000 <<<<<<
+11-01 07:13:55.740 I/AndroidRuntime( 3611): Using default boot image
+11-01 07:13:55.741 I/AndroidRuntime( 3611): Leaving lock profiling enabled
+11-01 07:13:55.927 W/libc    ( 3611): Access denied finding property "ro.product.name_for_attestation"
+11-01 07:13:55.927 W/libc    ( 3611): Access denied finding property "ro.product.brand_for_attestation"
+11-01 07:13:55.935 W/libc    ( 3611): Access denied finding property "ro.product.model_for_attestation"
+11-01 07:13:55.937 D/AndroidRuntime( 3611): Calling main entry com.android.commands.monkey.Monkey
+11-01 07:13:56.569 I/AndroidRuntime( 3611): VM exiting with result code 0.
+11-01 07:13:57.094 I/ExpoModulesCore( 3656): ✅ AppContext was initialized
+11-01 07:13:57.229 I/ExpoModulesCore( 3656): ✅ JSI interop was installed
+11-01 07:13:57.241 W/ExpoModulesV2( 3656): expo.modules.haptics.arguments.NotificationType does not implement io.github.expo.modules.v2.Enumerable. It crosses to JavaScript here, but R8 keeps an enum's entries and its property only when it does, so a release build may fail on it or send its entry names instead
+11-01 07:13:57.241 W/ExpoModulesV2( 3656): expo.modules.haptics.arguments.ImpactStyle does not implement io.github.expo.modules.v2.Enumerable. It crosses to JavaScript here, but R8 keeps an enum's entries and its property only when it does, so a release build may fail on it or send its entry names instead
+11-01 07:13:57.241 W/ExpoModulesV2( 3656): expo.modules.haptics.arguments.HapticType does not implement io.github.expo.modules.v2.Enumerable. It crosses to JavaScript here, but R8 keeps an enum's entries and its property only when it does, so a release build may fail on it or send its entry names instead
+11-01 07:13:57.241 I/ExpoModulesCore( 3656): ✅ Expo Modules v2 installed 1 module(s) on globalThis.expo.modules
+11-01 07:13:57.242 I/ExpoModulesCore( 3656): ✅ Constants were exported
+11-01 07:13:57.540 I/ReactNativeJS( 3656): Running "main"
+11-01 07:13:57.542 V/AsyncStorageExpoMigration( 3656): No scoped database found
+11-01 07:13:57.648 W/libc    ( 1437): Access denied finding property "ro.hardware.chipname"
+11-01 07:13:59.186 W/libc    ( 2977): Access denied finding property "persist.adb.tls_server.enable"
+11-01 07:13:59.186 W/libc    ( 2977): Access denied finding property "service.adb.tls.port"
+11-01 07:14:01.163 W/libc    ( 2977): Access denied finding property "persist.adb.tls_server.enable"
+11-01 07:14:01.169 W/libc    ( 2977): Access denied finding property "service.adb.tls.port"
+11-01 07:14:02.049 W/libc    ( 1043): Access denied finding property "ro.vendor.aware_available"
+11-01 07:14:02.049 W/libc    ( 1043): Access denied finding property "ro.vendor.aware_available"
+11-01 07:14:02.642 W/libc    ( 2977): Access denied finding property "persist.adb.tls_server.enable"
+11-01 07:14:02.646 W/libc    ( 2977): Access denied finding property "service.adb.tls.port"
+11-01 07:14:03.078 W/libc    ( 1043): Access denied finding property "ro.vendor.aware_available"
+11-01 07:14:03.102 W/libc    ( 1043): Access denied finding property "ro.vendor.aware_available"
+11-01 07:14:03.113 W/libc    ( 1043): Access denied finding property "ro.vendor.aware_available"
+11-01 07:14:03.226 W/libc    ( 1043): Access denied finding property "ro.vendor.aware_available"
+11-01 07:14:03.237 W/libc    ( 1043): Access denied finding property "ro.vendor.aware_available"
+11-01 07:14:05.145 W/libc    ( 2977): Access denied finding property "persist.adb.tls_server.enable"
+11-01 07:14:05.151 W/libc    ( 2977): Access denied finding property "service.adb.tls.port"
+11-01 07:14:09.214 W/libc    ( 2977): Access denied finding property "persist.adb.tls_server.enable"
+11-01 07:14:09.214 W/libc    ( 2977): Access denied finding property "service.adb.tls.port"
+11-01 07:14:09.418 W/libc    ( 1437): Access denied finding property "ro.hardware.chipname"
+11-01 07:14:10.386 W/libc    ( 2977): Access denied finding property "persist.adb.tls_server.enable"
+11-01 07:14:10.386 W/libc    ( 2977): Access denied finding property "service.adb.tls.port"
+11-01 07:14:11.437 W/libc    ( 2977): Access denied finding property "persist.adb.tls_server.enable"
+11-01 07:14:11.442 W/libc    ( 2977): Access denied finding property "service.adb.tls.port"
+11-01 07:14:16.235 W/libc    ( 1043): Access denied finding property "ro.vendor.aware_available"
+11-01 07:14:16.306 W/libc    ( 1043): Access denied finding property "ro.vendor.aware_available"
+11-01 07:14:16.329 W/libc    ( 1043): Access denied finding property "ro.vendor.aware_available"
+11-01 07:14:19.100 W/libc    ( 1043): Access denied finding property "ro.vendor.aware_available"
+11-01 07:14:19.100 W/libc    ( 1043): Access denied finding property "ro.vendor.aware_available"
+11-01 07:14:19.966 W/libc    ( 1043): Access denied finding property "ro.vendor.aware_available"
+11-01 07:14:20.008 W/libc    ( 1043): Access denied finding property "ro.vendor.aware_available"
+11-01 07:14:20.037 W/libc    ( 1043): Access denied finding property "ro.vendor.aware_available"
+11-01 07:14:20.175 W/libc    ( 1043): Access denied finding property "ro.vendor.aware_available"
+11-01 07:14:20.181 W/libc    ( 1043): Access denied finding property "ro.vendor.aware_available"
+11-01 07:14:23.308 W/libc    ( 2977): Access denied finding property "persist.adb.tls_server.enable"
+11-01 07:14:23.311 W/libc    ( 2977): Access denied finding property "service.adb.tls.port"
+11-01 07:14:29.975 W/libc    ( 2977): Access denied finding property "persist.adb.tls_server.enable"
+11-01 07:14:29.983 W/libc    ( 2977): Access denied finding property "service.adb.tls.port"
+11-01 07:14:38.878 W/libc    ( 2977): Access denied finding property "persist.adb.tls_server.enable"
+11-01 07:14:38.878 W/libc    ( 2977): Access denied finding property "service.adb.tls.port"
+11-01 07:14:41.323 W/ActivityManager(  518): Scheduling restart of crashed service com.google.android.gms/.nearby.exposurenotification.service.ExposureMatchingService in 220980ms for start-requested
+11-01 07:14:43.058 W/libc    ( 5388): Access denied finding property "ro.hardware.chipname"
+11-01 07:14:43.362 W/libc    ( 2977): Access denied finding property "persist.adb.tls_server.enable"
+11-01 07:14:43.362 W/libc    ( 2977): Access denied finding property "service.adb.tls.port"
+11-01 07:14:48.870 W/libc    ( 2977): Access denied finding property "persist.adb.tls_server.enable"
+11-01 07:14:48.870 W/libc    ( 2977): Access denied finding property "service.adb.tls.port"
+11-01 07:14:48.883 W/libc    ( 5388): Access denied finding property "ro.hardware.chipname"
+11-01 07:14:49.835 W/libc    ( 2977): Access denied finding property "persist.adb.tls_server.enable"
+11-01 07:14:49.835 W/libc    ( 2977): Access denied finding property "service.adb.tls.port"
+11-01 07:15:43.530 W/libc    ( 5388): Access denied finding property "ro.hardware.chipname"
+11-01 07:15:43.942 W/libc    ( 2977): Access denied finding property "persist.adb.tls_server.enable"
+11-01 07:15:43.942 W/libc    ( 2977): Access denied finding property "service.adb.tls.port"
