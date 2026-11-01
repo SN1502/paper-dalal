@@ -36,7 +36,16 @@
         }
       ],
       "expo-secure-store",
-      "expo-background-task"
+      "expo-background-task",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "enableMinifyInReleaseBuilds": false,
+            "enableShrinkResourcesInReleaseBuilds": false
+          }
+        }
+      ]
     ],
     "scheme": "paperdalal",
     "backgroundColor": "#F3F4F8",

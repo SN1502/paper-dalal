@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as SecureStore from 'expo-secure-store';
 import { useSyncExternalStore } from 'react';
 
+import { deleteSecret, getSecret, setSecret } from '../native/secureStore';
 import { DEFAULT_AI_SETTINGS, type AiRun, type AiSettings } from './types';
 
 const SETTINGS_KEY = 'paperdalal/ai/settings/v1';
@@ -81,7 +81,7 @@ export const aiStore = {
         );
         let key: string | null = null;
         try {
-          key = await SecureStore.getItemAsync(API_KEY_ITEM);
+          key = await getSecret(API_KEY_ITEM);
         } catch {
           key = null;
         }
@@ -93,7 +93,7 @@ export const aiStore = {
 
   async getApiKey(): Promise<string | null> {
     try {
-      return await SecureStore.getItemAsync(API_KEY_ITEM);
+      return await getSecret(API_KEY_ITEM);
     } catch {
       return null;
     }
@@ -101,10 +101,10 @@ export const aiStore = {
 
   async setApiKey(key: string | null) {
     if (key) {
-      await SecureStore.setItemAsync(API_KEY_ITEM, key, { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK });
+      await setSecret(API_KEY_ITEM, key);
       set({ hasKey: true, keyHint: key.slice(-4) });
     } else {
-      await SecureStore.deleteItemAsync(API_KEY_ITEM);
+      await deleteSecret(API_KEY_ITEM);
       set({ hasKey: false, keyHint: null });
     }
   },

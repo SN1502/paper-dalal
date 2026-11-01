@@ -1,9 +1,11 @@
+// Must be first: turns fatal JS errors into an error screen instead of a closed app.
+import { getFatalError, onFatalError } from '@/crashGuard';
 // Defines the background AI task at startup, as expo-task-manager requires.
 import { syncBackgroundTask } from '@/ai/background';
 import { aiRunner } from '@/ai/runner';
 import { aiStore } from '@/ai/store';
 import { controller } from '@/state/controller';
-import { Stack } from 'expo-router';
+import { Stack, type ErrorBoundaryProps } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SystemUI from 'expo-system-ui';
 import { useEffect, useState } from 'react';
@@ -15,20 +17,37 @@ import { engineStore } from '@/state/engineStore';
 import { Txt } from '@/ui/kit';
 import { usePalette, useIsDark } from '@/ui/theme';
 import { ToastHost } from '@/ui/ToastHost';
+import { CrashScreen } from '@/ui/CrashScreen';
+
+/** Expo Router shows this when a screen throws while rendering. */
+export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
+  return (
+    <SafeAreaProvider>
+      <CrashScreen error={error} onRetry={() => void retry()} />
+    </SafeAreaProvider>
+  );
+}
 
 export default function RootLayout() {
   const p = usePalette();
   const dark = useIsDark();
   const [ready, setReady] = useState(engineStore.isReady());
   const [failed, setFailed] = useState<string | null>(null);
+  const [fatal, setFatal] = useState<Error | null>(getFatalError());
+
+  useEffect(() => onFatalError(setFatal), []);
 
   useEffect(() => {
     let alive = true;
     bootstrap()
       .then(() => {
-        controller.setAfterCycle(() => void aiRunner.maybeAutoRun('auto'));
-        const ai = aiStore.get();
-        void syncBackgroundTask(ai.settings.enabled && ai.hasKey);
+        try {
+          controller.setAfterCycle(() => void aiRunner.maybeAutoRun('auto'));
+          const ai = aiStore.get();
+          void syncBackgroundTask(ai.settings.enabled && ai.hasKey);
+        } catch (e) {
+          console.error('[PaperDalal] AI setup failed:', e instanceof Error ? e.message : e);
+        }
         if (alive) setReady(true);
       })
       .catch((e) => alive && setFailed(e instanceof Error ? e.message : 'Could not start'));
@@ -40,6 +59,14 @@ export default function RootLayout() {
   useEffect(() => {
     SystemUI.setBackgroundColorAsync(p.bg).catch(() => undefined);
   }, [p.bg]);
+
+  if (fatal) {
+    return (
+      <SafeAreaProvider>
+        <CrashScreen error={fatal} onRetry={() => setFatal(null)} />
+      </SafeAreaProvider>
+    );
+  }
 
   return (
     <SafeAreaProvider>

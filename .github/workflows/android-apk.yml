@@ -1,8 +1,8 @@
 name: Build Android APK
 
-# Every push to main (and any v* tag) builds a release APK and publishes it as a
-# GitHub Release, so it can be downloaded and installed straight from a phone.
-# It can also be started by hand from the Actions tab ("Run workflow").
+# Every push to main (and any v* tag) builds a release APK, installs it on an Android
+# emulator to check that it opens and works, and only then publishes it as a GitHub
+# Release that can be downloaded and installed straight from a phone.
 on:
   workflow_dispatch:
   push:
@@ -18,10 +18,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  apk:
+  build:
     # Ubuntu 24.04 images ship with the Android SDK preinstalled.
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    outputs:
+      tag: ${{ steps.ver.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
 
@@ -54,7 +56,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Type-check and test the trading engine
+      - name: Type-check and run the tests
         run: |
           npx tsc --noEmit
           npm test
@@ -66,7 +68,8 @@ jobs:
 
       - name: Build release APK
         working-directory: android
-        run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
+        # x86_64 is included so the APK also runs on the test emulator and Chromebooks.
+        run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a,armeabi-v7a,x86_64
 
       - name: Name the APK
         run: cp android/app/build/outputs/apk/release/app-release.apk "PaperDalal-${{ steps.ver.outputs.tag }}.apk"
@@ -77,14 +80,73 @@ jobs:
           path: PaperDalal-*.apk
           retention-days: 30
 
+  smoke-test:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: PaperDalal-apk
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Open the app on an Android 14 emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: bash .github/scripts/smoke.sh
+
+      - name: Save screenshots and the device log to the ci-logs branch
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          test -d smoke || exit 0
+          cd smoke
+          git init -q
+          git checkout -q -b ci-logs
+          git add -A
+          git -c user.name="PaperDalal CI" -c user.email="ci@users.noreply.github.com" commit -q -m "Smoke test for ${{ needs.build.outputs.tag }}: $(cat status 2>/dev/null || echo unknown)"
+          git push -q -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ci-logs
+
+      - name: Fail if the app didn't stay open
+        run: |
+          status=$(cat smoke/status 2>/dev/null || echo missing)
+          echo "Smoke test: $status"
+          if [ "$status" != alive ]; then
+            echo "::error::The app did not stay open on the emulator ($status)."
+            grep -E "FATAL EXCEPTION|AndroidRuntime|ReactNativeJS.*(Error|error)|\[PaperDalal\]" smoke/logcat-app.txt | head -40 | while IFS= read -r line; do echo "::error::$line"; done
+            exit 1
+          fi
+
+  release:
+    needs: [build, smoke-test]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: PaperDalal-apk
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.ver.outputs.tag }}
-          name: PaperDalal ${{ steps.ver.outputs.tag }}
+          tag_name: ${{ needs.build.outputs.tag }}
+          name: PaperDalal ${{ needs.build.outputs.tag }}
           target_commitish: ${{ github.sha }}
           body: |
             Download the APK below on your Android phone and open it to install.
             Android may ask you to allow installs from your browser or file manager.
+            This build was installed and opened on an Android 14 emulator before release.
           files: PaperDalal-*.apk
           make_latest: true
