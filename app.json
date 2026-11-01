@@ -34,7 +34,9 @@
             "backgroundColor": "#0B0D13"
           }
         }
-      ]
+      ],
+      "expo-secure-store",
+      "expo-background-task"
     ],
     "scheme": "paperdalal",
     "backgroundColor": "#F3F4F8",

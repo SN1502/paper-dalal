@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 
 import { holdingViews, positionViews, type HoldingView, type PositionView } from '@/engine/selectors';
+import type { Gtt, Instrument } from '@/engine/types';
 import { pct, rupees, signedRupees } from '@/lib/format';
 import { formatDayKey } from '@/lib/time';
 import { useEngine } from '@/state/engineStore';
@@ -9,12 +10,19 @@ import { useQuotes } from '@/state/quoteStore';
 import { Card, Divider, Empty, Pill, Screen, Segmented, Stat, TopBar, Txt } from '@/ui/kit';
 import { useNav } from '@/ui/nav';
 import { LivePrice } from '@/ui/Price';
+import { ExitSheet } from '@/ui/ExitSheet';
 import { ActionSheet } from '@/ui/Sheet';
 import { space, toneOf, usePalette } from '@/ui/theme';
 
 type Tab = 'positions' | 'holdings';
 
-function PositionRow({ v, onPress }: { v: PositionView; onPress: () => void }) {
+function exitText(g: Gtt | undefined): string | null {
+  if (!g) return null;
+  const parts = [g.stopPrice !== null ? `SL ${rupees(g.stopPrice)}` : null, g.targetPrice !== null ? `Target ${rupees(g.targetPrice)}` : null];
+  return parts.filter(Boolean).join(' · ');
+}
+
+function PositionRow({ v, exit, onPress }: { v: PositionView; exit?: Gtt; onPress: () => void }) {
   const p = usePalette();
   const { pos } = v;
   const closed = pos.netQty === 0;
@@ -26,10 +34,16 @@ function PositionRow({ v, onPress }: { v: PositionView; onPress: () => void }) {
           <Txt v="bodyStrong" numberOfLines={1} style={{ flexShrink: 1 }}>
             {pos.instrument.tradingSymbol}
           </Txt>
+          {pos.ai ? <Pill label="AI" tone="accent" icon="sparkles" /> : null}
         </View>
         <Txt v="small" c="muted" num numberOfLines={1}>
           {closed ? `Closed · ${pos.buyQty} bought, ${pos.sellQty} sold` : `${pos.netQty > 0 ? 'Qty' : 'Short'} ${Math.abs(pos.netQty)} · Avg ${rupees(pos.avgPrice)}`}
         </Txt>
+        {!closed && exit ? (
+          <Txt v="small" c="faint" num numberOfLines={1}>
+            {exitText(exit)}
+          </Txt>
+        ) : null}
       </View>
       <View style={{ alignItems: 'flex-end', gap: 2 }}>
         <Txt v="bodyStrong" num c={toneOf(p, v.pnl)}>
@@ -46,18 +60,26 @@ function PositionRow({ v, onPress }: { v: PositionView; onPress: () => void }) {
   );
 }
 
-function HoldingRow({ v, onPress }: { v: HoldingView; onPress: () => void }) {
+function HoldingRow({ v, exit, onPress }: { v: HoldingView; exit?: Gtt; onPress: () => void }) {
   const p = usePalette();
   const h = v.holding;
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.row, { backgroundColor: pressed ? p.surfaceAlt : p.surface }]}>
       <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
-        <Txt v="bodyStrong" numberOfLines={1}>
-          {h.instrument.tradingSymbol}
-        </Txt>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Txt v="bodyStrong" numberOfLines={1} style={{ flexShrink: 1 }}>
+            {h.instrument.tradingSymbol}
+          </Txt>
+          {h.ai ? <Pill label="AI" tone="accent" icon="sparkles" /> : null}
+        </View>
         <Txt v="small" c="muted" num numberOfLines={1}>
           {h.qty} × {rupees(h.avgPrice)} · since {formatDayKey(h.since)}
         </Txt>
+        {exit ? (
+          <Txt v="small" c="faint" num numberOfLines={1}>
+            {exitText(exit)}
+          </Txt>
+        ) : null}
         <Txt v="small" c={toneOf(p, v.dayChange)} num>
           Today {signedRupees(v.dayChange)}
           {v.dayChangePct !== null ? ` (${pct(v.dayChangePct)})` : ''}
@@ -89,8 +111,10 @@ export default function PortfolioScreen() {
   const [tab, setTab] = useState<Tab>('positions');
   const [menuPos, setMenuPos] = useState<PositionView | null>(null);
   const [menuHold, setMenuHold] = useState<HoldingView | null>(null);
+  const [exitFor, setExitFor] = useState<{ inst: Instrument; gtt: Gtt | null } | null>(null);
 
   const positions = useMemo(() => positionViews(state, quotes), [state, quotes]);
+  const exits = useMemo(() => new Map(state.gtts.filter((g) => g.status === 'ACTIVE').map((g) => [g.instrument.symbol, g])), [state.gtts]);
   const holdings = useMemo(() => holdingViews(state, quotes), [state, quotes]);
 
   const posTotals = useMemo(() => {
@@ -186,7 +210,9 @@ export default function PortfolioScreen() {
           data={positions}
           keyExtractor={(v) => v.pos.key}
           ListHeaderComponent={positions.length ? summary : undefined}
-          renderItem={({ item }) => <PositionRow v={item} onPress={() => setMenuPos(item)} />}
+          renderItem={({ item }) => (
+            <PositionRow v={item} exit={item.pos.product === 'CNC' ? exits.get(item.pos.instrument.symbol) : undefined} onPress={() => setMenuPos(item)} />
+          )}
           ItemSeparatorComponent={() => <Divider inset={space.lg} />}
           ListEmptyComponent={
             <Empty
@@ -202,7 +228,7 @@ export default function PortfolioScreen() {
           data={holdings}
           keyExtractor={(v) => v.holding.instrument.symbol}
           ListHeaderComponent={holdings.length ? summary : undefined}
-          renderItem={({ item }) => <HoldingRow v={item} onPress={() => setMenuHold(item)} />}
+          renderItem={({ item }) => <HoldingRow v={item} exit={exits.get(item.holding.instrument.symbol)} onPress={() => setMenuHold(item)} />}
           ItemSeparatorComponent={() => <Divider inset={space.lg} />}
           ListEmptyComponent={
             <Empty icon="briefcase-outline" title="No holdings yet" body="Buy with Delivery (CNC). Shares settle into Holdings on the next trading day." />
@@ -242,6 +268,15 @@ export default function PortfolioScreen() {
                   onPress: () =>
                     nav.order({ symbol: menuPos.pos.instrument.symbol, side: menuPos.pos.netQty < 0 ? 'SELL' : 'BUY', product: menuPos.pos.product }),
                 },
+                ...(menuPos.pos.product === 'CNC' && menuPos.pos.netQty > 0
+                  ? [
+                      {
+                        label: exits.get(menuPos.pos.instrument.symbol) ? 'Edit stop-loss / target' : 'Add stop-loss / target',
+                        icon: 'shield-checkmark-outline' as const,
+                        onPress: () => setExitFor({ inst: menuPos.pos.instrument, gtt: exits.get(menuPos.pos.instrument.symbol) ?? null }),
+                      },
+                    ]
+                  : []),
                 { label: 'View chart', icon: 'stats-chart' as const, onPress: () => nav.stock(menuPos.pos.instrument.symbol) },
               ]
             : []
@@ -267,11 +302,17 @@ export default function PortfolioScreen() {
                   tone: 'buy',
                   onPress: () => nav.order({ symbol: menuHold.holding.instrument.symbol, side: 'BUY', product: 'CNC' }),
                 },
+                {
+                  label: exits.get(menuHold.holding.instrument.symbol) ? 'Edit stop-loss / target' : 'Add stop-loss / target',
+                  icon: 'shield-checkmark-outline',
+                  onPress: () => setExitFor({ inst: menuHold.holding.instrument, gtt: exits.get(menuHold.holding.instrument.symbol) ?? null }),
+                },
                 { label: 'View chart', icon: 'stats-chart', onPress: () => nav.stock(menuHold.holding.instrument.symbol) },
               ]
             : []
         }
       />
+      <ExitSheet visible={!!exitFor} onClose={() => setExitFor(null)} instrument={exitFor?.inst ?? null} existing={exitFor?.gtt ?? null} />
     </Screen>
   );
 }

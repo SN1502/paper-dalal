@@ -390,3 +390,67 @@ describe('yahoo parsing', () => {
     }
   });
 });
+
+describe('GTT exits and AI orders', () => {
+  const bracketBuy = (s: EngineState, now: number, ltp: number, stop: number, target: number) =>
+    placeOrder(s, { ...order(INFY, { qty: 10 }), source: 'AI', bracket: { stopPrice: stop, targetPrice: target } }, {
+      now,
+      quote: quote(INFY, ltp, now),
+      prices: {},
+    });
+
+  it('creates a GTT when a bracketed AI buy fills and tags the position', () => {
+    const r = bracketBuy(fresh(), at(MON, '10:00'), 1500, 1410, 1680);
+    assert.equal(r.error, null);
+    assert.equal(r.order?.source, 'AI');
+    assert.equal(r.state.gtts.length, 1);
+    assert.equal(r.state.gtts[0].stopPrice, 1410);
+    assert.equal(r.state.gtts[0].source, 'AI');
+    assert.equal(r.state.positions['INFY.NS|CNC'].ai, true);
+    const next = rolloverTo(r.state, TUE, {}).state;
+    assert.equal(next.holdings['INFY.NS'].ai, true);
+    assert.equal(next.gtts[0].status, 'ACTIVE', 'GTT survives the day change');
+  });
+
+  it('rejects a bracket with the stop above the entry', () => {
+    const r = bracketBuy(fresh(), at(MON, '10:00'), 1500, 1520, 1680);
+    assert.match(r.error ?? '', /Stop-loss .* must be below the entry/);
+  });
+
+  it('fires the stop on a live price and sells the position', () => {
+    let s = bracketBuy(fresh(), at(MON, '10:00'), 1500, 1410, 1680).state;
+    s = rolloverTo(s, TUE, {}).state;
+    const t = tick(s, INFY, 1405, at(TUE, '11:00'));
+    const g = t.state.gtts[0];
+    assert.equal(g.status, 'TRIGGERED');
+    assert.equal(g.triggeredLeg, 'STOP');
+    assert.equal(t.state.holdings['INFY.NS'], undefined);
+    const exit = t.state.orders.find((o) => o.id === g.exitOrderId);
+    assert.equal(exit?.source, 'GTT');
+    assert.equal(exit?.avgPrice, 1405);
+    assert.equal(t.state.fills[0].realizedPnl, -950);
+  });
+
+  it('fires the target from candles while the app was closed', () => {
+    let s = bracketBuy(fresh(), at(MON, '10:00'), 1500, 1410, 1680).state;
+    s = rolloverTo(s, TUE, {}).state;
+    const candles = {
+      'INFY.NS': [
+        { t: at(TUE, '13:00'), o: 1660, h: 1675, l: 1655, c: 1670, v: 1 },
+        { t: at(TUE, '13:01'), o: 1671, h: 1690, l: 1668, c: 1685, v: 1 },
+      ],
+    };
+    const out = replayCandles(s, candles, at(TUE, '12:00'), at(TUE, '14:00'), {});
+    const g = out.state.gtts[0];
+    assert.equal(g.status, 'TRIGGERED');
+    assert.equal(g.triggeredLeg, 'TARGET');
+    assert.equal(g.triggerPrice, 1680);
+  });
+
+  it('cancels the GTT when the position is sold by hand', () => {
+    let s = bracketBuy(fresh(), at(MON, '10:00'), 1500, 1410, 1680).state;
+    s = place(s, order(INFY, { side: 'SELL', qty: 10 }), at(MON, '11:00'), 1520).state;
+    const t = tick(s, INFY, 1521, at(MON, '11:01'));
+    assert.equal(t.state.gtts[0].status, 'CANCELLED');
+  });
+});

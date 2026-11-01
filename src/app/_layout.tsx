@@ -1,3 +1,8 @@
+// Defines the background AI task at startup, as expo-task-manager requires.
+import { syncBackgroundTask } from '@/ai/background';
+import { aiRunner } from '@/ai/runner';
+import { aiStore } from '@/ai/store';
+import { controller } from '@/state/controller';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SystemUI from 'expo-system-ui';
@@ -20,7 +25,12 @@ export default function RootLayout() {
   useEffect(() => {
     let alive = true;
     bootstrap()
-      .then(() => alive && setReady(true))
+      .then(() => {
+        controller.setAfterCycle(() => void aiRunner.maybeAutoRun('auto'));
+        const ai = aiStore.get();
+        void syncBackgroundTask(ai.settings.enabled && ai.hasKey);
+        if (alive) setReady(true);
+      })
       .catch((e) => alive && setFailed(e instanceof Error ? e.message : 'Could not start'));
     return () => {
       alive = false;
@@ -46,6 +56,9 @@ export default function RootLayout() {
           <Stack.Screen name="stock/[symbol]" />
           <Stack.Screen name="search" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
           <Stack.Screen name="order" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
+          <Stack.Screen name="ai/settings" />
+          <Stack.Screen name="ai/signals" />
+          <Stack.Screen name="ai/run/[id]" />
         </Stack>
       ) : (
         <View style={{ flex: 1, backgroundColor: p.bg, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 }}>

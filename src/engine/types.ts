@@ -4,6 +4,14 @@ export type Side = 'BUY' | 'SELL';
 export type Product = 'CNC' | 'MIS';
 export type OrderType = 'MARKET' | 'LIMIT' | 'SL' | 'SL-M';
 export type OrderStatus = 'OPEN' | 'TRIGGER_PENDING' | 'COMPLETE' | 'CANCELLED' | 'REJECTED';
+/** Who created an order: the user, the AI trader, or the engine (square-off, GTT exits). */
+export type OrderSource = 'USER' | 'AI' | 'SQUARE_OFF' | 'GTT';
+
+/** Stop-loss and target attached to a delivery buy; becomes a GTT when the buy fills. */
+export interface Bracket {
+  stopPrice: number;
+  targetPrice: number;
+}
 
 export interface Instrument {
   /** Yahoo Finance symbol, e.g. RELIANCE.NS, 500325.BO, ^NSEI */
@@ -82,7 +90,8 @@ export interface Order {
   filledQty: number;
   /** Rejection, cancellation or expiry reason. */
   message: string | null;
-  source: 'USER' | 'SQUARE_OFF';
+  source: OrderSource;
+  bracket?: Bracket | null;
 }
 
 export interface Fill {
@@ -117,6 +126,8 @@ export interface Position {
   realizedPnl: number;
   /** Margin held for an open MIS position. */
   blockedMargin: number;
+  /** Opened by the AI trader. */
+  ai?: boolean;
 }
 
 export interface Holding {
@@ -125,6 +136,30 @@ export interface Holding {
   avgPrice: number;
   /** IST date the first lot entered the demat (for display). */
   since: string;
+  /** Bought by the AI trader. */
+  ai?: boolean;
+}
+
+/**
+ * Good-till-triggered exit for a delivery position: sells at market when the price
+ * falls to the stop or rises to the target, whichever comes first. Lasts across days.
+ */
+export interface Gtt {
+  id: string;
+  instrument: Instrument;
+  qty: number;
+  stopPrice: number | null;
+  targetPrice: number | null;
+  status: 'ACTIVE' | 'TRIGGERED' | 'CANCELLED';
+  source: 'USER' | 'AI';
+  /** Entry order that created it, when it came from a bracket. */
+  entryOrderId: string | null;
+  createdAt: number;
+  updatedAt: number;
+  triggeredLeg: 'STOP' | 'TARGET' | null;
+  triggerPrice: number | null;
+  exitOrderId: string | null;
+  message: string | null;
 }
 
 export interface DayRecord {
@@ -169,6 +204,8 @@ export interface EngineState {
   /** Keyed by instrument symbol. */
   holdings: Record<string, Holding>;
   watchlist: Instrument[];
+  /** Newest first. */
+  gtts: Gtt[];
   /** Closed trading days, newest first. */
   dayLog: DayRecord[];
   /** IST date that `positions` belong to. */
@@ -196,6 +233,8 @@ export interface OrderInput {
   qty: number;
   price: number | null;
   triggerPrice: number | null;
+  source?: 'USER' | 'AI';
+  bracket?: Bracket | null;
 }
 
 export interface EngineResult {

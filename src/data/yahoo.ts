@@ -107,7 +107,7 @@ export function parseChartQuote(symbol: string, result: any): Quote {
   };
 }
 
-export type ChartRange = '1d' | '5d' | '1mo' | '6mo' | '1y' | '5y';
+export type ChartRange = '1d' | '5d' | '1mo' | '6mo' | '1y' | '2y' | '5y';
 
 export const RANGE_INTERVAL: Record<ChartRange, string> = {
   '1d': '1m',
@@ -115,6 +115,7 @@ export const RANGE_INTERVAL: Record<ChartRange, string> = {
   '1mo': '60m',
   '6mo': '1d',
   '1y': '1d',
+  '2y': '1d',
   '5y': '1wk',
 };
 
@@ -184,4 +185,55 @@ export async function yahooSearch(query: string): Promise<SearchHit[]> {
     });
   }
   return hits;
+}
+
+export interface CloseHistory {
+  t: number[];
+  c: number[];
+}
+
+function closesFrom(timestamps: unknown, closes: unknown): CloseHistory | null {
+  if (!Array.isArray(timestamps) || !Array.isArray(closes)) return null;
+  const t: number[] = [];
+  const c: number[] = [];
+  for (let i = 0; i < Math.min(timestamps.length, closes.length); i++) {
+    const ts = timestamps[i];
+    const v = closes[i];
+    if (typeof ts === 'number' && typeof v === 'number' && Number.isFinite(v) && v > 0) {
+      t.push(ts * 1000);
+      c.push(v);
+    }
+  }
+  return t.length ? { t, c } : null;
+}
+
+/** Reads both spark response shapes: v7 `{spark: {result: [...]}}` and the flat `{SYMBOL: {...}}`. */
+export function parseSparkHistory(json: any): Record<string, CloseHistory> {
+  const out: Record<string, CloseHistory> = {};
+  const results: any[] = json?.spark?.result;
+  if (Array.isArray(results)) {
+    for (const r of results) {
+      const res = r?.response?.[0];
+      const sym = typeof r?.symbol === 'string' ? r.symbol : res?.meta?.symbol;
+      const h = closesFrom(res?.timestamp, res?.indicators?.quote?.[0]?.close);
+      if (sym && h) out[sym] = h;
+    }
+    return out;
+  }
+  if (json && typeof json === 'object') {
+    for (const [sym, v] of Object.entries<any>(json)) {
+      const h = closesFrom(v?.timestamp, v?.close);
+      if (h) out[sym] = h;
+    }
+  }
+  return out;
+}
+
+/** Daily closes for up to 20 symbols in one request. */
+export async function yahooHistoryBatch(symbols: string[], range: '1y' | '2y' = '2y'): Promise<Record<string, CloseHistory>> {
+  const json = await getJson(
+    `/v7/finance/spark?symbols=${symbols.map(encodeURIComponent).join(',')}&range=${range}&interval=1d&includePrePost=false`,
+    15000,
+  );
+  return parseSparkHistory(json);
 }

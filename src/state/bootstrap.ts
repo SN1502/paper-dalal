@@ -1,16 +1,20 @@
+import { aiStore } from '../ai/store';
+import { strategyStore } from '../strategies/store';
 import { controller } from './controller';
 import { engineStore } from './engineStore';
 import { quoteStore } from './quoteStore';
 
 let boot: Promise<void> | null = null;
 
-/** Loads saved state once and starts the price loop. Safe to call repeatedly. */
-export function bootstrap(): Promise<void> {
+/**
+ * Loads saved state once. In the foreground it also starts the price loop; a background
+ * task only needs the data and drives refreshes itself.
+ */
+export function bootstrap(opts: { background?: boolean } = {}): Promise<void> {
   if (!boot) {
-    boot = (async () => {
-      await Promise.all([engineStore.hydrate(), quoteStore.load()]);
-      controller.start();
-    })();
+    boot = Promise.all([engineStore.hydrate(), quoteStore.load(), aiStore.load(), strategyStore.load()]).then(() => undefined);
   }
-  return boot;
+  return boot.then(() => {
+    if (!opts.background) controller.start();
+  });
 }

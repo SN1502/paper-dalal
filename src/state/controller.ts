@@ -12,7 +12,9 @@ import { BENCHMARK, INDICES, instrumentFromSymbol } from '../data/instruments';
 import { yahooCandles } from '../data/yahoo';
 import {
   addToWatchlist,
+  cancelGtt,
   cancelOrder,
+  createGtt,
   isActive,
   modifyOrder,
   moveInWatchlist,
@@ -22,6 +24,7 @@ import {
   removeFromWatchlist,
   replayCandles,
   resetAccount,
+  updateGtt,
   updateSettings,
   type ModifyChanges,
 } from '../engine/engine';
@@ -54,6 +57,12 @@ class MarketController {
   private appState: AppStateStatus | string = AppState.currentState ?? 'active';
   private focus = new Map<string, { inst: Instrument; count: number }>();
   private started = false;
+  private afterCycle: (() => void) | null = null;
+
+  /** Runs after every successful price refresh (used to start scheduled AI sessions). */
+  setAfterCycle(fn: () => void) {
+    this.afterCycle = fn;
+  }
 
   start() {
     if (this.started) return;
@@ -101,7 +110,7 @@ class MarketController {
 
   private schedule() {
     this.clearTimer();
-    if (this.appState !== 'active' || !engineStore.isReady()) return;
+    if (!this.started || this.appState !== 'active' || !engineStore.isReady()) return;
     const phase = clockPhase(Date.now());
     const base = engineStore.get().settings.refreshSeconds;
     let seconds: number;
@@ -169,6 +178,11 @@ class MarketController {
       const now = Date.now();
       commit(processQuotes(engineStore.get(), quoteStore.record(), now));
       engineStore.setMeta({ lastEvalAt: now });
+      try {
+        this.afterCycle?.();
+      } catch {
+        // The hook must never break price refreshes.
+      }
     } catch (e) {
       feedStatusStore.set({ lastError: e instanceof Error ? e.message : 'Refresh failed' });
     } finally {
@@ -237,6 +251,35 @@ class MarketController {
     if (r.error) return { order: r.order, error: r.error };
     commit(r);
     return { order: r.order, error: null };
+  }
+
+  /** Adds a stop-loss/target exit (GTT) to a delivery position. */
+  async createGtt(inst: Instrument, qty: number, stopPrice: number | null, targetPrice: number | null): Promise<string | null> {
+    const q = await this.quoteFor(inst);
+    const r = createGtt(engineStore.get(), { instrument: inst, qty, stopPrice, targetPrice, source: 'USER' }, Date.now(), q?.ltp ?? null);
+    if (r.error) return r.error;
+    engineStore.set(r.state);
+    toastStore.push([
+      {
+        id: `gtt-${r.gtt?.id}`,
+        kind: 'info',
+        title: `Exit set · ${inst.tradingSymbol}`,
+        body: [stopPrice !== null ? `SL ₹${stopPrice}` : null, targetPrice !== null ? `target ₹${targetPrice}` : null].filter(Boolean).join(' · '),
+      },
+    ]);
+    return null;
+  }
+
+  updateGtt(id: string, patch: { stopPrice?: number | null; targetPrice?: number | null; qty?: number }): { error: string | null } {
+    const g = engineStore.get().gtts.find((x) => x.id === id);
+    const ltp = g ? quoteStore.get(g.instrument.symbol)?.ltp ?? null : null;
+    const r = updateGtt(engineStore.get(), id, patch, Date.now(), ltp);
+    if (!r.error) engineStore.set(r.state);
+    return { error: r.error };
+  }
+
+  cancelGtt(id: string) {
+    commit(cancelGtt(engineStore.get(), id, Date.now()));
   }
 
   cancelOrder(orderId: string) {

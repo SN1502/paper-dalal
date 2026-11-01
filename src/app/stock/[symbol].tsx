@@ -4,16 +4,18 @@ import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { RANGE_INTERVAL, yahooCandles, type ChartRange } from '@/data/yahoo';
-import { positionKey } from '@/engine/engine';
+import { activeGttFor, positionKey } from '@/engine/engine';
 import { compactCount, num, pct, rupees, signedNum, signedRupees } from '@/lib/format';
 import { SESSION, clockPhase, formatIstDateTime, formatIstTime, istDayKey, istParts, istTimestamp } from '@/lib/time';
 import { controller } from '@/state/controller';
 import { useEngine } from '@/state/engineStore';
 import { useQuote } from '@/state/quoteStore';
+import { ExitSheet } from '@/ui/ExitSheet';
 import { Button, Card, IconButton, Pill, Screen, Segmented, Stat, TopBar, Txt } from '@/ui/kit';
 import { LineChart, type ChartPoint } from '@/ui/LineChart';
 import { useNav } from '@/ui/nav';
 import { Change, LivePrice, changeOf } from '@/ui/Price';
+import { StrategyCard } from '@/ui/StrategyCard';
 import { space, toneOf, usePalette } from '@/ui/theme';
 
 const RANGES: { value: ChartRange; label: string }[] = [
@@ -53,6 +55,7 @@ export default function StockScreen() {
   const [chartError, setChartError] = useState<string | null>(null);
   const [scrub, setScrub] = useState<ChartPoint | null>(null);
   const [quoteError, setQuoteError] = useState<string | null>(null);
+  const [exitOpen, setExitOpen] = useState(false);
 
   useEffect(() => controller.focusSymbol(inst), [inst]);
 
@@ -121,6 +124,7 @@ export default function StockScreen() {
   const holding = state.holdings[symbol];
   const cnc = state.positions[positionKey(symbol, 'CNC')];
   const mis = state.positions[positionKey(symbol, 'MIS')];
+  const exit = activeGttFor(state, symbol)[0] ?? null;
   const ltp = q?.ltp ?? null;
   const live = q ? clockPhase(Date.now()) === 'open' && istDayKey(q.time) === istDayKey(Date.now()) : false;
 
@@ -236,7 +240,32 @@ export default function StockScreen() {
                 pnl={ltp !== null ? mis.realizedPnl + (mis.netQty !== 0 ? mis.netQty * (ltp - mis.avgPrice) : 0) : mis.realizedPnl}
               />
             ) : null}
+            {holding || (cnc && cnc.netQty > 0) ? (
+              <View style={styles.exitRow}>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Txt v="small" c="muted">
+                    {exit
+                      ? `Exit${exit.source === 'AI' ? ' (set by AI)' : ''}: SL ${exit.stopPrice !== null ? rupees(exit.stopPrice) : '—'} · Target ${
+                          exit.targetPrice !== null ? rupees(exit.targetPrice) : '—'
+                        }`
+                      : 'No stop-loss or target set'}
+                  </Txt>
+                  {holding?.ai || cnc?.ai ? (
+                    <Txt v="small" c="faint">
+                      Bought by the AI trader
+                    </Txt>
+                  ) : null}
+                </View>
+                <Button label={exit ? 'Edit exit' : 'Add exit'} variant="secondary" compact onPress={() => setExitOpen(true)} />
+              </View>
+            ) : null}
           </Card>
+        ) : null}
+
+        {!inst.isIndex ? (
+          <View style={{ marginHorizontal: space.lg, marginTop: space.md }}>
+            <StrategyCard symbol={symbol} price={ltp} />
+          </View>
         ) : null}
 
         {inst.isIndex ? (
@@ -252,6 +281,7 @@ export default function StockScreen() {
           <Button label="Buy" variant="buy" style={{ flex: 1 }} onPress={() => nav.order({ symbol, side: 'BUY' })} />
         </View>
       ) : null}
+      <ExitSheet visible={exitOpen} onClose={() => setExitOpen(false)} instrument={inst} existing={exit} />
     </Screen>
   );
 }
@@ -279,6 +309,7 @@ const styles = StyleSheet.create({
   grid: { flexDirection: 'row', flexWrap: 'wrap', rowGap: space.lg },
   cell: { width: '33.33%', paddingRight: space.sm },
   posLine: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+  exitRow: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   bottomBar: {
     position: 'absolute',
     left: 0,

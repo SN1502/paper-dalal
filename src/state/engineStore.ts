@@ -97,7 +97,7 @@ export const engineStore = {
       const raw = await AsyncStorage.getItem(KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (isValid(parsed)) loaded = { ...parsed, settings: { ...DEFAULT_SETTINGS, ...parsed.settings } };
+        if (isValid(parsed)) loaded = { ...parsed, gtts: parsed.gtts ?? [], settings: { ...DEFAULT_SETTINGS, ...parsed.settings } };
       }
       const rawMeta = await AsyncStorage.getItem(META_KEY);
       if (rawMeta) meta = { ...meta, ...JSON.parse(rawMeta) };

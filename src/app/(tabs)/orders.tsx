@@ -3,7 +3,7 @@ import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 
 import { describeOrder } from '@/engine/engine';
 import { closedOrders, groupByDay, openOrders } from '@/engine/selectors';
-import type { Fill, Order } from '@/engine/types';
+import type { Fill, Gtt, Order } from '@/engine/types';
 import { rupees, signedRupees } from '@/lib/format';
 import { formatDayKey, formatIstTime, istDayKey } from '@/lib/time';
 import { controller } from '@/state/controller';
@@ -12,10 +12,11 @@ import { useQuote } from '@/state/quoteStore';
 import { Button, Card, Divider, Empty, KeyValue, Pill, Screen, Segmented, TopBar, Txt, type PillTone } from '@/ui/kit';
 import { useNav } from '@/ui/nav';
 import { LivePrice } from '@/ui/Price';
+import { ExitSheet } from '@/ui/ExitSheet';
 import { ConfirmSheet, Sheet } from '@/ui/Sheet';
 import { space, toneOf, usePalette } from '@/ui/theme';
 
-type Tab = 'open' | 'history' | 'trades';
+type Tab = 'open' | 'exits' | 'history' | 'trades';
 
 const STATUS: Record<Order['status'], [string, PillTone]> = {
   OPEN: ['Open', 'accent'],
@@ -98,7 +99,7 @@ function HistoryRow({ o }: { o: Order }) {
         </View>
         <Txt v="small" c="muted" numberOfLines={2}>
           {o.status === 'COMPLETE' ? `Avg ${rupees(o.avgPrice)}` : priceLabel(o)}
-          {o.source === 'SQUARE_OFF' ? ' · auto square-off' : ''}
+          {o.source === 'SQUARE_OFF' ? ' · auto square-off' : o.source === 'GTT' ? ' · exit (stop-loss/target)' : o.source === 'AI' ? ' · by AI' : ''}
           {o.message && o.status !== 'COMPLETE' ? ` · ${o.message}` : ''}
         </Txt>
       </View>
@@ -145,17 +146,82 @@ function TradeRow({ f, onPress }: { f: Fill; onPress: () => void }) {
   );
 }
 
-type Item = { kind: 'day'; day: string } | { kind: 'order'; o: Order } | { kind: 'fill'; f: Fill };
+type Item = { kind: 'day'; day: string } | { kind: 'order'; o: Order } | { kind: 'fill'; f: Fill } | { kind: 'gtt'; g: Gtt };
+
+function GttRow({ g, onEdit, onCancel }: { g: Gtt; onEdit: () => void; onCancel: () => void }) {
+  const p = usePalette();
+  const q = useQuote(g.instrument.symbol);
+  const ltp = q?.ltp ?? null;
+  const active = g.status === 'ACTIVE';
+  const toStop = ltp !== null && g.stopPrice !== null ? ((g.stopPrice - ltp) / ltp) * 100 : null;
+  const toTarget = ltp !== null && g.targetPrice !== null ? ((g.targetPrice - ltp) / ltp) * 100 : null;
+  return (
+    <View style={[styles.row, { opacity: active ? 1 : 0.7 }]}>
+      <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+        <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          <Txt v="bodyStrong">{g.instrument.tradingSymbol}</Txt>
+          <Txt v="small" c="muted">
+            × {g.qty}
+          </Txt>
+          <Pill label={g.source === 'AI' ? 'AI' : 'You'} tone={g.source === 'AI' ? 'accent' : 'neutral'} />
+          {!active ? (
+            <Pill
+              label={g.status === 'TRIGGERED' ? (g.triggeredLeg === 'STOP' ? 'Stop hit' : 'Target hit') : 'Cancelled'}
+              tone={g.status === 'TRIGGERED' ? (g.triggeredLeg === 'STOP' ? 'down' : 'up') : 'neutral'}
+            />
+          ) : null}
+        </View>
+        <Txt v="small" c="muted" num>
+          SL {g.stopPrice !== null ? rupees(g.stopPrice) : '—'}
+          {active && toStop !== null ? ` (${toStop.toFixed(1)}%)` : ''} · Target {g.targetPrice !== null ? rupees(g.targetPrice) : '—'}
+          {active && toTarget !== null ? ` (+${toTarget.toFixed(1)}%)` : ''}
+        </Txt>
+        {!active && g.triggerPrice !== null ? (
+          <Txt v="small" c="faint" num>
+            Sold at {rupees(g.triggerPrice)} · {formatDayKey(istDayKey(g.updatedAt))}
+          </Txt>
+        ) : null}
+        {!active && g.status === 'CANCELLED' && g.message ? (
+          <Txt v="small" c="faint">
+            {g.message}
+          </Txt>
+        ) : null}
+      </View>
+      {active ? (
+        <View style={{ gap: 6 }}>
+          <Button label="Edit" variant="secondary" compact onPress={onEdit} />
+          <Button label="Cancel" variant="danger" compact onPress={onCancel} />
+        </View>
+      ) : (
+        <View style={{ alignItems: 'flex-end' }}>
+          <Txt v="caption" c="faint">
+            LTP
+          </Txt>
+          <Txt v="small" num c={p.muted}>
+            {ltp !== null ? rupees(ltp) : '—'}
+          </Txt>
+        </View>
+      )}
+    </View>
+  );
+}
 
 export default function OrdersScreen() {
   const state = useEngine();
   const [tab, setTab] = useState<Tab>('open');
   const [cancelId, setCancelId] = useState<string | null>(null);
   const [fillDetail, setFillDetail] = useState<Fill | null>(null);
+  const [editGtt, setEditGtt] = useState<Gtt | null>(null);
+  const [cancelGttId, setCancelGttId] = useState<string | null>(null);
 
   const open = useMemo(() => openOrders(state), [state]);
   const items: Item[] = useMemo(() => {
     if (tab === 'open') return open.map((o) => ({ kind: 'order' as const, o }));
+    if (tab === 'exits') {
+      const active = state.gtts.filter((g) => g.status === 'ACTIVE');
+      const done = state.gtts.filter((g) => g.status !== 'ACTIVE').slice(0, 40);
+      return [...active, ...done].map((g) => ({ kind: 'gtt' as const, g }));
+    }
     if (tab === 'history') {
       return groupByDay(closedOrders(state), (o) => istDayKey(o.placedAt)).flatMap((g) => [
         { kind: 'day' as const, day: g.day },
@@ -169,6 +235,8 @@ export default function OrdersScreen() {
   }, [tab, state, open]);
 
   const cancelling = cancelId ? state.orders.find((o) => o.id === cancelId) : undefined;
+  const activeExits = state.gtts.filter((g) => g.status === 'ACTIVE').length;
+  const cancellingGtt = cancelGttId ? state.gtts.find((g) => g.id === cancelGttId) : undefined;
 
   return (
     <Screen>
@@ -177,6 +245,7 @@ export default function OrdersScreen() {
         <Segmented
           options={[
             { value: 'open', label: open.length ? `Open · ${open.length}` : 'Open' },
+            { value: 'exits', label: activeExits ? `Exits · ${activeExits}` : 'Exits' },
             { value: 'history', label: 'History' },
             { value: 'trades', label: 'Trades' },
           ]}
@@ -186,7 +255,7 @@ export default function OrdersScreen() {
       </View>
       <FlatList
         data={items}
-        keyExtractor={(it, i) => (it.kind === 'day' ? `d-${it.day}-${i}` : it.kind === 'order' ? it.o.id : it.f.id)}
+        keyExtractor={(it, i) => (it.kind === 'day' ? `d-${it.day}-${i}` : it.kind === 'order' ? it.o.id : it.kind === 'gtt' ? it.g.id : it.f.id)}
         renderItem={({ item }) => {
           if (item.kind === 'day')
             return (
@@ -195,6 +264,7 @@ export default function OrdersScreen() {
               </Txt>
             );
           if (item.kind === 'fill') return <TradeRow f={item.f} onPress={() => setFillDetail(item.f)} />;
+          if (item.kind === 'gtt') return <GttRow g={item.g} onEdit={() => setEditGtt(item.g)} onCancel={() => setCancelGttId(item.g.id)} />;
           return tab === 'open' ? <OpenOrderRow o={item.o} onCancel={() => setCancelId(item.o.id)} /> : <HistoryRow o={item.o} />;
         }}
         ItemSeparatorComponent={tab === 'open' ? () => <View style={{ height: space.md }} /> : () => <Divider inset={space.lg} />}
@@ -202,12 +272,28 @@ export default function OrdersScreen() {
         ListEmptyComponent={
           tab === 'open' ? (
             <Empty icon="receipt-outline" title="No open orders" body="Limit, stop-loss and after-market orders wait here until they execute." />
+          ) : tab === 'exits' ? (
+            <Empty
+              icon="shield-checkmark-outline"
+              title="No exits set"
+              body="Stop-loss and target exits on delivery holdings appear here. The AI sets one on every buy; you can add your own from a stock’s page."
+            />
           ) : tab === 'history' ? (
             <Empty icon="time-outline" title="No order history yet" body="Executed, cancelled and rejected orders appear here." />
           ) : (
             <Empty icon="swap-horizontal-outline" title="No trades yet" body="Every execution is listed here with its charges and booked P&L." />
           )
         }
+      />
+      <ExitSheet visible={!!editGtt} onClose={() => setEditGtt(null)} instrument={editGtt?.instrument ?? null} existing={editGtt} />
+      <ConfirmSheet
+        visible={!!cancellingGtt}
+        onClose={() => setCancelGttId(null)}
+        title="Cancel this exit?"
+        body={cancellingGtt ? `${cancellingGtt.instrument.tradingSymbol} will no longer be sold automatically at its stop-loss or target.` : ''}
+        confirmLabel="Cancel exit"
+        destructive
+        onConfirm={() => cancellingGtt && controller.cancelGtt(cancellingGtt.id)}
       />
       <ConfirmSheet
         visible={!!cancelling}

@@ -150,6 +150,38 @@ const POPULAR_NSE: Array<[string, string]> = [
   ['SILVERBEES', 'Nippon India Silver ETF'],
 ];
 
+/** Sector clusters for the strategy engine (mean-reversion clusters and sector rotation). */
+export const SECTOR_MEMBERS: Record<string, string[]> = {
+  'Banks': ['HDFCBANK', 'ICICIBANK', 'SBIN', 'KOTAKBANK', 'AXISBANK', 'INDUSINDBK', 'BANKBARODA', 'PNB', 'CANBK', 'FEDERALBNK', 'IDFCFIRSTB', 'AUBANK', 'BANDHANBNK', 'YESBANK'],
+  'Financials': ['BAJFINANCE', 'BAJAJFINSV', 'SHRIRAMFIN', 'CHOLAFIN', 'MUTHOOTFIN', 'BAJAJHLDNG', 'JIOFIN', 'SBILIFE', 'HDFCLIFE', 'ICICIGI', 'ICICIPRULI', 'LICI', 'RECLTD', 'PFC', 'IRFC', 'BSE', 'CDSL'],
+  'IT': ['TCS', 'INFY', 'HCLTECH', 'WIPRO', 'TECHM', 'LTIM', 'PERSISTENT', 'COFORGE', 'MPHASIS', 'OFSS', 'KPITTECH', 'TATAELXSI'],
+  'Energy': ['RELIANCE', 'ONGC', 'IOC', 'BPCL', 'GAIL'],
+  'Power': ['NTPC', 'POWERGRID', 'ADANIGREEN', 'ADANIPOWER', 'TATAPOWER'],
+  'Metals & Mining': ['TATASTEEL', 'JSWSTEEL', 'HINDALCO', 'VEDL', 'HINDZINC', 'SAIL', 'NMDC', 'COALINDIA'],
+  'Auto': ['BAJAJ-AUTO', 'MARUTI', 'M&M', 'EICHERMOT', 'HEROMOTOCO', 'TVSMOTOR', 'HYUNDAI', 'MOTHERSON', 'BOSCHLTD', 'MRF'],
+  'FMCG': ['ITC', 'HINDUNILVR', 'NESTLEIND', 'BRITANNIA', 'TATACONSUM', 'DABUR', 'MARICO', 'GODREJCP', 'COLPAL'],
+  'Healthcare': ['SUNPHARMA', 'DRREDDY', 'CIPLA', 'DIVISLAB', 'LUPIN', 'AUROPHARMA', 'TORNTPHARM', 'ZYDUSLIFE', 'APOLLOHOSP', 'MAXHEALTH'],
+  'Industrials': ['LT', 'HAL', 'BEL', 'BHEL', 'MAZDOCK', 'SIEMENS', 'ABB', 'POLYCAB', 'RVNL', 'SUZLON'],
+  'Materials': ['ASIANPAINT', 'ULTRACEMCO', 'GRASIM', 'PIDILITIND', 'BERGEPAINT', 'AMBUJACEM', 'SHREECEM', 'ASTRAL'],
+  'Consumer': ['TITAN', 'TRENT', 'DMART', 'HAVELLS', 'DIXON', 'VOLTAS'],
+  'Internet': ['ETERNAL', 'SWIGGY', 'NYKAA', 'PAYTM', 'POLICYBZR', 'NAUKRI', 'DELHIVERY'],
+  'Telecom': ['BHARTIARTL', 'IDEA'],
+  'Infra & Transport': ['ADANIENT', 'ADANIPORTS', 'DLF', 'INDIGO', 'IRCTC'],
+  'ETF': ['NIFTYBEES', 'BANKBEES', 'JUNIORBEES', 'ITBEES', 'GOLDBEES', 'SILVERBEES'],
+};
+
+const SECTOR_BY_TRADING_SYMBOL: Record<string, string> = Object.fromEntries(
+  Object.entries(SECTOR_MEMBERS).flatMap(([sector, members]) => members.map((m) => [m, sector])),
+);
+
+/** Sector of an NSE symbol such as "TCS.NS", or null when it isn't in the strategy universe. */
+export function sectorOf(symbol: string): string | null {
+  return SECTOR_BY_TRADING_SYMBOL[symbol.replace(/\.NS$/, '')] ?? null;
+}
+
+/** Gold and silver ETFs: the uncorrelated asset in dual-momentum rotation (151 Trading Strategies §4.1.2). */
+export const SAFE_HAVEN_ETFS = ['GOLDBEES.NS', 'SILVERBEES.NS'];
+
 export const POPULAR: Instrument[] = POPULAR_NSE.map(([ts, name]) => ({
   symbol: `${ts}.NS`,
   tradingSymbol: ts,
@@ -234,3 +266,6 @@ export function googleTicker(inst: Instrument): string | null {
   if (inst.exchange !== 'NSE') return null;
   return `${encodeURIComponent(inst.tradingSymbol)}:NSE`;
 }
+
+/** Stocks the strategy engine ranks: the bundled universe without ETFs. */
+export const STRATEGY_UNIVERSE: Instrument[] = POPULAR.filter((i) => sectorOf(i.symbol) !== 'ETF');
