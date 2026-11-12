@@ -77,7 +77,9 @@ class LiveTrader {
     if (this.started) return;
     this.started = true;
     controller.setExtraInstruments(() => (liveStore.get().armed ? this.universe : []));
-    controller.addAfterCycle(() => void this.onCycle());
+    controller.addAfterCycle(() => {
+      this.onCycle().catch((e) => console.error('[PaperDalal] Live cycle failed:', e instanceof Error ? e.message : e));
+    });
     if (liveStore.get().armed) setKeepAwake(liveStore.get().settings.keepAwake);
   }
 
@@ -94,6 +96,10 @@ class LiveTrader {
     this.backoffUntil = 0;
     liveStore.setArmed(true);
     this.universeAt = 0;
+    // The top of the daily strategy scan is part of the watch list.
+    void strategyStore.ensureFresh().then(() => {
+      this.universeAt = 0;
+    });
     void controller.refresh();
     return null;
   }
