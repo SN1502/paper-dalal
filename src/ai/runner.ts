@@ -12,6 +12,7 @@ import { runAgent } from './agent';
 import { dueSlot } from './schedule';
 import { drawdownPaused } from './risk';
 import { strategyStore } from '../strategies/store';
+import { aiLock } from './lock';
 import { aiStore, monthSpend } from './store';
 import type { AgentEnv } from './tools';
 import type { AiRun, RunTrigger } from './types';
@@ -23,6 +24,10 @@ const STATUS_TEXT: Record<MarketStatus, string> = {
   weekend: 'closed for the weekend; orders queue for Monday’s open',
   holiday: 'closed for a market holiday; orders queue for the next open',
 };
+
+export function marketStatusText(now = Date.now()): string {
+  return STATUS_TEXT[marketStatus(now, quoteStore.get(BENCHMARK))];
+}
 
 export type AiStatus = 'no-key' | 'off' | 'running' | 'paused-budget' | 'paused-drawdown' | 'on';
 
@@ -39,7 +44,7 @@ export function aiStatus(): AiStatus {
   return 'on';
 }
 
-function makeEnv(): AgentEnv {
+export function makeEnv(): AgentEnv {
   return {
     now: () => Date.now(),
     getState: () => engineStore.get(),
@@ -50,7 +55,7 @@ function makeEnv(): AgentEnv {
     search: (q) => yahooSearch(q),
     placeOrder: (input) => controller.placeOrder(input),
     updateGtt: (id, patch) => controller.updateGtt(id, patch),
-    marketStatus: () => STATUS_TEXT[marketStatus(Date.now(), quoteStore.get(BENCHMARK))],
+    marketStatus: () => marketStatusText(),
     getScan: () => strategyStore.ensureFresh(),
     saveFundamentals: (symbol, record) => strategyStore.saveFundamentals(symbol, record),
   };
@@ -80,7 +85,7 @@ class AiRunner {
   private async checkAndRun(trigger: Exclude<RunTrigger, 'manual'>): Promise<void> {
     await aiStore.load();
     const s = aiStore.get();
-    if (!s.settings.enabled || !s.hasKey || this.current || !engineStore.isReady()) return;
+    if (!s.settings.enabled || !s.hasKey || this.current || !engineStore.isReady() || aiLock.holder() !== null) return;
     const now = Date.now();
     if (marketStatus(now, quoteStore.get(BENCHMARK)) !== 'open') return;
     const slot = dueSlot(now, s.settings, s.journal);
@@ -95,6 +100,7 @@ class AiRunner {
     await aiStore.load();
     if (!aiStore.get().hasKey) return 'Add your Claude API key first.';
     if (this.current) return 'A session is already running.';
+    if (aiLock.holder() !== null) return 'Live mode is making a decision right now. Try again in a minute.';
     void this.run('manual', null);
     return null;
   }
@@ -110,34 +116,11 @@ class AiRunner {
 
   private run(trigger: RunTrigger, slot: number | null): Promise<AiRun | null> {
     const p = (async () => {
-      const apiKey = await aiStore.getApiKey();
-      if (!apiKey) return null;
-      const abort = new AbortController();
-      this.abort = abort;
-      const s = aiStore.get();
-      const previous = s.journal.find((r) => r.status === 'completed') ?? null;
+      if (!aiLock.tryAcquire('swing')) return null;
       try {
-        const run = await runAgent({
-          apiKey,
-          settings: s.settings,
-          env: makeEnv(),
-          trigger,
-          slot,
-          previous,
-          signal: abort.signal,
-          onUpdate: (r) => {
-            aiStore.setRunning(r);
-            aiStore.upsertRun(r);
-          },
-        });
-        aiStore.upsertRun(run);
-        announce(run);
-        return run;
+        return await this.runLocked(trigger, slot);
       } finally {
-        aiStore.setRunning(null);
-        this.abort = null;
-        await aiStore.flush();
-        await engineStore.flush();
+        aiLock.release('swing');
       }
     })();
     this.current = p;
@@ -145,6 +128,38 @@ class AiRunner {
       if (this.current === p) this.current = null;
     }).catch(() => undefined);
     return p;
+  }
+
+  private async runLocked(trigger: RunTrigger, slot: number | null): Promise<AiRun | null> {
+    const apiKey = await aiStore.getApiKey();
+    if (!apiKey) return null;
+    const abort = new AbortController();
+    this.abort = abort;
+    const s = aiStore.get();
+    const previous = s.journal.find((r) => r.status === 'completed') ?? null;
+    try {
+      const run = await runAgent({
+        apiKey,
+        settings: s.settings,
+        env: makeEnv(),
+        trigger,
+        slot,
+        previous,
+        signal: abort.signal,
+        onUpdate: (r) => {
+          aiStore.setRunning(r);
+          aiStore.upsertRun(r);
+        },
+      });
+      aiStore.upsertRun(run);
+      announce(run);
+      return run;
+    } finally {
+      aiStore.setRunning(null);
+      this.abort = null;
+      await aiStore.flush();
+      await engineStore.flush();
+    }
   }
 }
 

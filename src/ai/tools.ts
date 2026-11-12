@@ -212,20 +212,20 @@ export function normalizeSymbol(raw: unknown): string | null {
   return `${base}.NS`;
 }
 
-const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
-const pctOf = (a: number | null | undefined, b: number | null | undefined) =>
+export const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+export const pctOf = (a: number | null | undefined, b: number | null | undefined) =>
   a !== null && a !== undefined && b ? round2(((a - b) / b) * 100) : null;
 
 export class SessionTools {
   buysThisRun = 0;
   decisions: AiDecision[] = [];
   finished: FinishData | null = null;
-  private candleCache = new Map<string, Candle[]>();
-  private summaryCache = new Map<string, TechnicalSummary | null>();
-  private lastScan: ScanResult | null = null;
-  private scanLoaded = false;
+  protected candleCache = new Map<string, Candle[]>();
+  protected summaryCache = new Map<string, TechnicalSummary | null>();
+  protected lastScan: ScanResult | null = null;
+  protected scanLoaded = false;
 
-  private async scan(): Promise<ScanResult | null> {
+  protected async scan(): Promise<ScanResult | null> {
     if (!this.scanLoaded) {
       this.lastScan = await this.env.getScan().catch(() => null);
       this.scanLoaded = true;
@@ -233,7 +233,7 @@ export class SessionTools {
     return this.lastScan;
   }
 
-  private async candles(symbol: string): Promise<Candle[]> {
+  protected async candles(symbol: string): Promise<Candle[]> {
     let c = this.candleCache.get(symbol);
     if (!c) {
       c = await this.env.getDailyCandles(symbol);
@@ -243,16 +243,16 @@ export class SessionTools {
   }
 
   constructor(
-    private env: AgentEnv,
-    private settings: AiSettings,
-    private onStep: (step: AiStep) => void,
+    protected env: AgentEnv,
+    protected settings: AiSettings,
+    protected onStep: (step: AiStep) => void,
   ) {}
 
-  private step(kind: AiStep['kind'], text: string) {
+  protected step(kind: AiStep['kind'], text: string) {
     this.onStep({ t: this.env.now(), kind, text });
   }
 
-  private async technicals(symbol: string): Promise<TechnicalSummary | null> {
+  protected async technicals(symbol: string): Promise<TechnicalSummary | null> {
     if (this.summaryCache.has(symbol)) return this.summaryCache.get(symbol) ?? null;
     const candles = await this.candles(symbol);
     const s = summarize(candles);
@@ -260,11 +260,12 @@ export class SessionTools {
     return s;
   }
 
-  private aiPositionCount(state: EngineState): number {
+  /** Swing (delivery) positions the AI holds or is buying. Live intraday trades have their own limits. */
+  protected aiPositionCount(state: EngineState): number {
     const set = new Set<string>();
     for (const h of Object.values(state.holdings)) if (h.ai && h.qty > 0) set.add(h.instrument.symbol);
-    for (const p of Object.values(state.positions)) if (p.ai && p.netQty > 0) set.add(p.instrument.symbol);
-    for (const o of state.orders) if (isActive(o) && o.source === 'AI' && o.side === 'BUY') set.add(o.instrument.symbol);
+    for (const p of Object.values(state.positions)) if (p.ai && p.product === 'CNC' && p.netQty > 0) set.add(p.instrument.symbol);
+    for (const o of state.orders) if (isActive(o) && o.source === 'AI' && o.side === 'BUY' && o.product === 'CNC') set.add(o.instrument.symbol);
     return set.size;
   }
 
@@ -314,8 +315,8 @@ export class SessionTools {
     const quotes = this.env.quotes();
     const sum = accountSummary(state, quotes);
     const s = this.settings;
-    const exitsFor = (sym: string) =>
-      activeGttFor(state, sym).map((g) => ({ qty: g.qty, stop_loss: g.stopPrice, target: g.targetPrice, set_by: g.source === 'AI' ? 'you' : 'user' }));
+    const exitsFor = (sym: string, product: 'CNC' | 'MIS' = 'CNC') =>
+      activeGttFor(state, sym, product).map((g) => ({ qty: g.qty, stop_loss: g.stopPrice, target: g.targetPrice, set_by: g.source === 'AI' ? 'you' : 'user' }));
     return {
       now_ist: `${formatDayKey(istDayKey(this.env.now()))} ${formatIstTime(this.env.now(), false)}`,
       market_status: this.env.marketStatus(),
@@ -362,7 +363,7 @@ export class SessionTools {
             ltp: q?.ltp ?? null,
             pnl_pct: pctOf(q?.ltp, p.avgPrice),
             ai_managed: !!p.ai,
-            exits: p.product === 'CNC' ? exitsFor(p.instrument.symbol) : [],
+            exits: exitsFor(p.instrument.symbol, p.product),
           };
         }),
       open_orders: state.orders.filter(isActive).map((o) => ({
@@ -379,7 +380,7 @@ export class SessionTools {
     };
   }
 
-  private async marketOverview() {
+  protected async marketOverview() {
     const out: Record<string, unknown> = {
       now_ist: `${formatDayKey(istDayKey(this.env.now()))} ${formatIstTime(this.env.now(), false)}`,
       market_status: this.env.marketStatus(),
@@ -403,7 +404,7 @@ export class SessionTools {
     return out;
   }
 
-  private async strategyScan(input: Record<string, unknown>): Promise<ToolOutcome> {
+  protected async strategyScan(input: Record<string, unknown>): Promise<ToolOutcome> {
     this.step('tool', 'Ran the 151 Trading Strategies scan');
     this.scanLoaded = false;
     const scan = await this.scan();
@@ -454,7 +455,7 @@ export class SessionTools {
     });
   }
 
-  private async singleStockSignals(sym: string, price: number) {
+  protected async singleStockSignals(sym: string, price: number) {
     const out: Record<string, unknown> = {};
     const scan = await this.scan();
     const row = scan?.stocks.find((x) => x.symbol === sym);
@@ -507,7 +508,7 @@ export class SessionTools {
     return out;
   }
 
-  private async fundamentals(input: Record<string, unknown>): Promise<ToolOutcome> {
+  protected async fundamentals(input: Record<string, unknown>): Promise<ToolOutcome> {
     const sym = normalizeSymbol(input.symbol);
     if (!sym) return fail('Give an NSE symbol such as "TCS".');
     const inst = this.env.instrumentFor(sym);
@@ -539,7 +540,7 @@ export class SessionTools {
     });
   }
 
-  private async searchStocks(input: Record<string, unknown>) {
+  protected async searchStocks(input: Record<string, unknown>) {
     const q = String(input.query ?? '').trim();
     if (!q) return { results: [] };
     this.step('tool', `Looked up “${q.slice(0, 40)}”`);
@@ -552,7 +553,7 @@ export class SessionTools {
     };
   }
 
-  private async snapshot(input: Record<string, unknown>): Promise<ToolOutcome> {
+  protected async snapshot(input: Record<string, unknown>): Promise<ToolOutcome> {
     const sym = normalizeSymbol(input.symbol);
     if (!sym) return fail('Give an NSE symbol such as "TCS". BSE-only symbols are not supported.');
     const inst = this.env.instrumentFor(sym);
@@ -578,7 +579,7 @@ export class SessionTools {
     });
   }
 
-  private async buy(input: Record<string, unknown>): Promise<ToolOutcome> {
+  protected async buy(input: Record<string, unknown>): Promise<ToolOutcome> {
     const sym = normalizeSymbol(input.symbol);
     if (!sym) return fail('Give an NSE symbol such as "TCS".');
     const inst = this.env.instrumentFor(sym);
@@ -604,6 +605,9 @@ export class SessionTools {
         orderId: null,
         outcome: 'rejected',
         error: reason,
+        product: 'CNC',
+        direction: 'long',
+        intent: 'open',
       });
       this.step('error', `Buy ${inst.tradingSymbol} rejected: ${reason}`);
       return { content: JSON.stringify({ status: 'rejected', reason }), isError: true };
@@ -674,6 +678,9 @@ export class SessionTools {
       orderId: o.id,
       outcome: filled ? 'filled' : 'queued',
       error: null,
+      product: 'CNC',
+      direction: 'long',
+      intent: 'open',
     });
     this.step(
       'order',
@@ -696,7 +703,7 @@ export class SessionTools {
     });
   }
 
-  private async sell(input: Record<string, unknown>): Promise<ToolOutcome> {
+  protected async sell(input: Record<string, unknown>): Promise<ToolOutcome> {
     const sym = normalizeSymbol(input.symbol);
     if (!sym) return fail('Give an NSE symbol such as "TCS".');
     const inst = this.env.instrumentFor(sym);
@@ -724,7 +731,7 @@ export class SessionTools {
     const o = res.order;
     if (res.error || !o || o.status === 'REJECTED') {
       const msg = res.error ?? o?.message ?? 'Order failed.';
-      this.decisions.push({ symbol: inst.tradingSymbol, action: 'SELL', qty, price: null, stop: null, target: null, conviction: null, rationale: reason, orderId: o?.id ?? null, outcome: 'rejected', error: msg });
+      this.decisions.push({ symbol: inst.tradingSymbol, action: 'SELL', qty, price: null, stop: null, target: null, conviction: null, rationale: reason, orderId: o?.id ?? null, outcome: 'rejected', error: msg, product: 'CNC', direction: 'long', intent: 'close' });
       this.step('error', `Sell ${inst.tradingSymbol} rejected: ${msg}`);
       return { content: JSON.stringify({ status: 'rejected', reason: msg }), isError: true };
     }
@@ -741,17 +748,20 @@ export class SessionTools {
       orderId: o.id,
       outcome: filled ? 'filled' : 'queued',
       error: null,
+      product: 'CNC',
+      direction: 'long',
+      intent: 'close',
     });
     this.step('order', `${filled ? 'Sold' : 'Placed sell for'} ${qty} ${inst.tradingSymbol}${filled ? ` at ₹${o.avgPrice}` : ''}`);
     return ok({ status: filled ? 'filled' : 'queued', symbol: inst.tradingSymbol, qty, fill_price: o.avgPrice });
   }
 
-  private async updateExit(input: Record<string, unknown>): Promise<ToolOutcome> {
+  protected async updateExit(input: Record<string, unknown>): Promise<ToolOutcome> {
     const sym = normalizeSymbol(input.symbol);
     if (!sym) return fail('Give an NSE symbol such as "TCS".');
     const inst = this.env.instrumentFor(sym);
     const reason = String(input.reason ?? '').trim().slice(0, 800);
-    const g = activeGttFor(this.env.getState(), sym).find((x) => x.source === 'AI');
+    const g = activeGttFor(this.env.getState(), sym, 'CNC').find((x) => x.source === 'AI');
     if (!g) return fail(`No active exit that you set on ${inst.tradingSymbol}.`);
     const q = await this.env.getQuote(inst);
     if (!q) return fail('No live price for this symbol.');
@@ -779,6 +789,8 @@ export class SessionTools {
       orderId: null,
       outcome: 'updated',
       error: null,
+      product: 'CNC',
+      direction: 'long',
     });
     this.step('order', `Updated exit for ${inst.tradingSymbol}: SL ₹${stop ?? '—'} · target ₹${target ?? '—'}`);
     return ok({ status: 'updated', symbol: inst.tradingSymbol, stop_loss: stop, target });
@@ -814,10 +826,10 @@ export function scanRow(s: StockSignal) {
   };
 }
 
-function ok(value: unknown): ToolOutcome {
+export function ok(value: unknown): ToolOutcome {
   return { content: JSON.stringify(value), isError: false };
 }
 
-function fail(message: string): ToolOutcome {
+export function fail(message: string): ToolOutcome {
   return { content: JSON.stringify({ error: message }), isError: true };
 }

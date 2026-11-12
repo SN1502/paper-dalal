@@ -124,7 +124,7 @@ export default function StockScreen() {
   const holding = state.holdings[symbol];
   const cnc = state.positions[positionKey(symbol, 'CNC')];
   const mis = state.positions[positionKey(symbol, 'MIS')];
-  const exit = activeGttFor(state, symbol)[0] ?? null;
+  const exit = activeGttFor(state, symbol, 'CNC')[0] ?? null;
   const ltp = q?.ltp ?? null;
   const live = q ? clockPhase(Date.now()) === 'open' && istDayKey(q.time) === istDayKey(Date.now()) : false;
 

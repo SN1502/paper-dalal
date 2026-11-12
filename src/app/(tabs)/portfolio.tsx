@@ -114,7 +114,11 @@ export default function PortfolioScreen() {
   const [exitFor, setExitFor] = useState<{ inst: Instrument; gtt: Gtt | null } | null>(null);
 
   const positions = useMemo(() => positionViews(state, quotes), [state, quotes]);
-  const exits = useMemo(() => new Map(state.gtts.filter((g) => g.status === 'ACTIVE').map((g) => [g.instrument.symbol, g])), [state.gtts]);
+  // Keyed by symbol|product: delivery and intraday positions have separate exits.
+  const exits = useMemo(
+    () => new Map(state.gtts.filter((g) => g.status === 'ACTIVE').map((g) => [`${g.instrument.symbol}|${g.product ?? 'CNC'}`, g])),
+    [state.gtts],
+  );
   const holdings = useMemo(() => holdingViews(state, quotes), [state, quotes]);
 
   const posTotals = useMemo(() => {
@@ -211,7 +215,7 @@ export default function PortfolioScreen() {
           keyExtractor={(v) => v.pos.key}
           ListHeaderComponent={positions.length ? summary : undefined}
           renderItem={({ item }) => (
-            <PositionRow v={item} exit={item.pos.product === 'CNC' ? exits.get(item.pos.instrument.symbol) : undefined} onPress={() => setMenuPos(item)} />
+            <PositionRow v={item} exit={exits.get(`${item.pos.instrument.symbol}|${item.pos.product}`)} onPress={() => setMenuPos(item)} />
           )}
           ItemSeparatorComponent={() => <Divider inset={space.lg} />}
           ListEmptyComponent={
@@ -228,7 +232,7 @@ export default function PortfolioScreen() {
           data={holdings}
           keyExtractor={(v) => v.holding.instrument.symbol}
           ListHeaderComponent={holdings.length ? summary : undefined}
-          renderItem={({ item }) => <HoldingRow v={item} exit={exits.get(item.holding.instrument.symbol)} onPress={() => setMenuHold(item)} />}
+          renderItem={({ item }) => <HoldingRow v={item} exit={exits.get(`${item.holding.instrument.symbol}|CNC`)} onPress={() => setMenuHold(item)} />}
           ItemSeparatorComponent={() => <Divider inset={space.lg} />}
           ListEmptyComponent={
             <Empty icon="briefcase-outline" title="No holdings yet" body="Buy with Delivery (CNC). Shares settle into Holdings on the next trading day." />
@@ -271,9 +275,9 @@ export default function PortfolioScreen() {
                 ...(menuPos.pos.product === 'CNC' && menuPos.pos.netQty > 0
                   ? [
                       {
-                        label: exits.get(menuPos.pos.instrument.symbol) ? 'Edit stop-loss / target' : 'Add stop-loss / target',
+                        label: exits.get(`${menuPos.pos.instrument.symbol}|CNC`) ? 'Edit stop-loss / target' : 'Add stop-loss / target',
                         icon: 'shield-checkmark-outline' as const,
-                        onPress: () => setExitFor({ inst: menuPos.pos.instrument, gtt: exits.get(menuPos.pos.instrument.symbol) ?? null }),
+                        onPress: () => setExitFor({ inst: menuPos.pos.instrument, gtt: exits.get(`${menuPos.pos.instrument.symbol}|CNC`) ?? null }),
                       },
                     ]
                   : []),
@@ -303,9 +307,9 @@ export default function PortfolioScreen() {
                   onPress: () => nav.order({ symbol: menuHold.holding.instrument.symbol, side: 'BUY', product: 'CNC' }),
                 },
                 {
-                  label: exits.get(menuHold.holding.instrument.symbol) ? 'Edit stop-loss / target' : 'Add stop-loss / target',
+                  label: exits.get(`${menuHold.holding.instrument.symbol}|CNC`) ? 'Edit stop-loss / target' : 'Add stop-loss / target',
                   icon: 'shield-checkmark-outline',
-                  onPress: () => setExitFor({ inst: menuHold.holding.instrument, gtt: exits.get(menuHold.holding.instrument.symbol) ?? null }),
+                  onPress: () => setExitFor({ inst: menuHold.holding.instrument, gtt: exits.get(`${menuHold.holding.instrument.symbol}|CNC`) ?? null }),
                 },
                 { label: 'View chart', icon: 'stats-chart', onPress: () => nav.stock(menuHold.holding.instrument.symbol) },
               ]

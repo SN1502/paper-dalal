@@ -9,12 +9,15 @@ import { nextRunAt } from '@/ai/schedule';
 import { aiPerformance } from '@/ai/selectors';
 import { monthSpend, useAi } from '@/ai/store';
 import type { AiRun } from '@/ai/types';
+import { aiIntradayStats } from '@/live/stats';
+import { spendOn, useLive } from '@/live/store';
 import { pct, signedRupees } from '@/lib/format';
-import { formatIstDateTime } from '@/lib/time';
+import { formatIstDateTime, istDayKey } from '@/lib/time';
 import { useEngine } from '@/state/engineStore';
 import { useQuotes } from '@/state/quoteStore';
 import { strategyStore, useStrategies } from '@/strategies/store';
 import { DecisionRow, whenLabel } from '@/ui/AiParts';
+import { PHASE } from '@/ui/LiveParts';
 import { Button, Card, Divider, IconButton, Pill, Screen, Stat, TopBar, Txt, type PillTone } from '@/ui/kit';
 import { radius, space, toneOf, usePalette } from '@/ui/theme';
 
@@ -63,6 +66,7 @@ export default function AiScreen() {
   const strategies = useStrategies();
   const state = useEngine();
   const quotes = useQuotes();
+  const live = useLive();
   const [, tick] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -80,6 +84,8 @@ export default function AiScreen() {
   const next = nextRunAt(Date.now(), ai.settings, ai.journal);
   const regime = strategies.scan?.regime ?? null;
   const lastStep = ai.running?.steps[ai.running.steps.length - 1];
+  const liveStats = useMemo(() => aiIntradayStats(state, quotes, live.runs, Date.now()), [state, quotes, live.runs]);
+  const liveSpent = spendOn(live, istDayKey(Date.now()));
 
   const runNow = async () => {
     setMessage(null);
@@ -143,6 +149,32 @@ export default function AiScreen() {
             </Txt>
           ) : null}
         </Card>
+
+        <Pressable onPress={() => router.push('/ai/live')} accessibilityRole="button" accessibilityLabel="Open Live trading">
+          {({ pressed }) => (
+            <Card style={[{ gap: space.sm }, pressed && { opacity: 0.85 }]}>
+              <View style={styles.row}>
+                <Ionicons name="pulse-outline" size={18} color={p.accent} />
+                <Txt v="bodyStrong" style={{ flex: 1 }}>
+                  Live trading
+                </Txt>
+                <Pill label={live.armed ? PHASE[live.phase][0] : 'Off'} tone={live.armed ? PHASE[live.phase][1] : 'neutral'} />
+                <Ionicons name="chevron-forward" size={18} color={p.faint} />
+              </View>
+              <Txt v="small" c="muted" numberOfLines={2}>
+                {live.armed
+                  ? live.phaseText
+                  : 'Intraday longs and shorts plus swing trades, decided by Claude from live signals and news while the app is open.'}
+              </Txt>
+              {live.armed || liveStats.tradesToday > 0 ? (
+                <Txt v="small" c="faint" num>
+                  Today: {liveStats.tradesToday} intraday trade{liveStats.tradesToday === 1 ? '' : 's'} · P&L {signedRupees(liveStats.pnlToday)} · $
+                  {liveSpent.toFixed(2)} spent
+                </Txt>
+              ) : null}
+            </Card>
+          )}
+        </Pressable>
 
         <Card style={{ gap: space.md }}>
           <View style={styles.row}>

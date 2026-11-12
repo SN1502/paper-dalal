@@ -73,6 +73,11 @@ export interface AiDecision {
   orderId: string | null;
   outcome: 'filled' | 'queued' | 'rejected' | 'updated';
   error: string | null;
+  /** Missing on decisions from older versions: delivery. */
+  product?: 'CNC' | 'MIS';
+  direction?: 'long' | 'short';
+  /** Whether the order opened or closed a position. */
+  intent?: 'open' | 'close';
 }
 
 export interface AiUsage {
@@ -86,7 +91,7 @@ export interface AiUsage {
   costUsd: number;
 }
 
-export type RunTrigger = 'auto' | 'manual' | 'background';
+export type RunTrigger = 'auto' | 'manual' | 'background' | 'live';
 
 export interface AiRun {
   id: string;

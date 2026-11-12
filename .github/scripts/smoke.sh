@@ -47,6 +47,18 @@ if [ "$status" = alive ]; then
   shot 5-portfolio
   alive || status=crashed-on-portfolio
 fi
+if [ "$status" = alive ]; then
+  adb shell am start -a android.intent.action.VIEW -d "paperdalal://ai/live" "$PKG" > /dev/null 2>&1
+  sleep 8
+  shot 6-live
+  alive || status=crashed-on-live
+fi
+if [ "$status" = alive ]; then
+  adb shell am start -a android.intent.action.VIEW -d "paperdalal://ai/live-settings" "$PKG" > /dev/null 2>&1
+  sleep 6
+  shot 7-live-settings
+  alive || status=crashed-on-live-settings
+fi
 
 echo "$status" > "$OUT/status"
 adb logcat -d -v time > "$OUT/logcat.txt" 2>/dev/null || true

@@ -1,4 +1,5 @@
 import { aiStore } from '../ai/store';
+import { liveStore } from '../live/store';
 import { strategyStore } from '../strategies/store';
 import { controller } from './controller';
 import { engineStore } from './engineStore';
@@ -12,7 +13,7 @@ let boot: Promise<void> | null = null;
  */
 export function bootstrap(opts: { background?: boolean } = {}): Promise<void> {
   if (!boot) {
-    boot = Promise.all([engineStore.hydrate(), quoteStore.load(), aiStore.load(), strategyStore.load()]).then(() => undefined);
+    boot = Promise.all([engineStore.hydrate(), quoteStore.load(), aiStore.load(), strategyStore.load(), liveStore.load()]).then(() => undefined);
   }
   return boot.then(() => {
     if (!opts.background) controller.start();

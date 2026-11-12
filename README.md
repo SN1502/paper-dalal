@@ -35,9 +35,22 @@ Each session Claude:
 - buys at most the number of new positions you allow, each with a stop-loss and target that become an automatic exit;
 - writes a market view and a summary you can read in the AI tab, with every decision's reasoning and every search it made.
 
-The app enforces these in code, whatever the model says: position size (default 10% of account value), risk per trade (default 1% lost if the stop is hit), number of AI positions, new buys per session, a cash reserve, a drawdown pause, minimum liquidity, NSE only, no shorting or F&O, stops 2–15% below entry with a reward-to-risk of at least 1.5, and stops that can only be raised. The AI can't sell positions you opened yourself.
+The app enforces these in code, whatever the model says: position size (default 10% of account value), risk per trade (default 1% lost if the stop is hit), number of AI positions, new buys per session, a cash reserve, a drawdown pause, minimum liquidity, NSE only, no F&O and no shorting in swing sessions (Live mode can short intraday), stops 2–15% below entry with a reward-to-risk of at least 1.5, and stops that can only be raised. The AI can't sell positions you opened yourself.
 
 Sessions run when the app is open during market hours, and in the background when Android allows (WorkManager, every 15 minutes or more; not after you swipe the app away). Web search must be enabled for your organization in the Claude Console; if it isn't, sessions still run without news.
+
+## Live mode (real-time intraday + swing)
+
+Open **AI → Live trading** and tap **Start Live mode**. While the app stays open during market hours (the screen is kept on), it:
+
+- watches about 40 stocks: your positions, the watchlist, stocks in the news and the top of the strategy scan;
+- builds 1-minute bars from each price refresh plus Yahoo's 1-minute candles, and detects intraday signals: opening gaps, opening-range breakouts, crossings of the previous day's pivot support/resistance (§3.14), breaks of the last hour's channel (§3.15), EMA(9)/EMA(21) crosses on 5-minute bars with a VWAP filter (§3.12), volume spikes and sharp 15-minute moves;
+- reads news every few minutes from Zerodha Pulse (Indian business headlines) and NSE corporate filings, and matches them to stocks (routine filings are ignored, market-wide news is kept as context);
+- calls Claude for a short decision when an important event arrives (news on a stock, a strong signal, anything that moves against an open position) and for a check-in every 30 minutes. Claude sees the account, its open trades, the new events and its earlier decisions that day, can open the intraday chart of any stock, and can then go **long or short intraday** (MIS, with a stop-loss and target that the app enforces and an automatic 3:20 PM square-off), trail or close its trades, or open a swing (delivery) position when news is a durable catalyst.
+
+Limits enforced in code: risk per intraday trade (default 0.5% of the account), largest position (20%), at most 3 open intraday positions and 6 entries a day, a daily loss stop (2%), no new entries after 2:45 PM, stops 0.3–3% away with reward-to-risk ≥ 1.5, liquid NSE stocks priced ₹50 or more, shorts can be switched off. A daily API budget (default $3) paces calls across the session; one Sonnet decision costs a few cents, Haiku far less. Live mode and the scheduled sessions never run at the same time.
+
+Limits of the approach: prices are polled snapshots, not exchange ticks, so stops fill at the next refreshed price; nothing trades while the app is closed or in the background; headline feeds can lag the market. It is a simulator for testing ideas, not an execution system.
 
 ## Strategy signals (151 Trading Strategies)
 
@@ -117,10 +130,11 @@ src/
   engine/         Trading engine (orders, GTT exits), charges, selectors, types
   strategies/     151 Trading Strategies signals: scan, single-stock rules, SUE/value, daily cache
   ai/             Claude client, agent loop, tools, risk limits, schedule, background task
+  live/           Live mode: 1-minute bars, intraday signals, news feeds and matching, intraday limits, live trader
   data/           Yahoo + Google price sources, failover, bundled symbol list
   state/          Persistence, live quote store, polling controller
   ui/             Theme, components, chart
-tests/            Engine, strategy and AI-agent tests (node --test; Claude is mocked)
+tests/            Engine, strategy, AI-agent and Live-mode tests (node --test; Claude and the feeds are mocked)
 .github/workflows Android APK build
 ```
 

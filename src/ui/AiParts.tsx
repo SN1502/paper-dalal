@@ -18,12 +18,23 @@ export function whenLabel(t: number): string {
 export function DecisionRow({ d }: { d: AiDecision }) {
   const nav = useNav();
   const tone: PillTone = d.outcome === 'rejected' ? 'down' : d.action === 'BUY' ? 'buy' : d.action === 'SELL' ? 'sell' : 'accent';
-  const label = d.action === 'UPDATE_EXIT' ? 'Exit updated' : d.action === 'BUY' ? 'Buy' : 'Sell';
+  const intraday = d.product === 'MIS';
+  const label =
+    d.action === 'UPDATE_EXIT'
+      ? 'Exit updated'
+      : intraday && d.direction === 'short'
+        ? d.intent === 'close'
+          ? 'Cover'
+          : 'Short'
+        : d.action === 'BUY'
+          ? 'Buy'
+          : 'Sell';
   const outcome = d.outcome === 'filled' ? 'Executed' : d.outcome === 'queued' ? 'Queued' : d.outcome === 'updated' ? 'Updated' : 'Rejected';
   return (
     <Pressable onPress={() => nav.stock(`${d.symbol}.NS`)} style={{ gap: 4, paddingVertical: space.sm }} accessibilityRole="button">
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
         <Pill label={label} tone={tone} />
+        {intraday ? <Pill label="Intraday" tone="neutral" /> : null}
         <Txt v="bodyStrong">{d.symbol}</Txt>
         {d.qty ? (
           <Txt v="small" c="muted" num>

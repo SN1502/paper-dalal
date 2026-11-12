@@ -454,3 +454,58 @@ describe('GTT exits and AI orders', () => {
     assert.equal(t.state.gtts[0].status, 'CANCELLED');
   });
 });
+
+describe('intraday exits (long and short)', () => {
+  const misEntry = (s: EngineState, side: 'BUY' | 'SELL', ltp: number, stop: number, target: number, now = at(MON, '10:00')) =>
+    placeOrder(s, { ...order(SBIN, { product: 'MIS', side, qty: 100 }), source: 'AI', bracket: { stopPrice: stop, targetPrice: target } }, {
+      now,
+      quote: quote(SBIN, ltp, now),
+      prices: { 'SBIN.NS': ltp },
+    });
+
+  it('creates a buy-back exit for an intraday short and fires its target', () => {
+    const r = misEntry(fresh(), 'SELL', 800, 808, 784);
+    assert.equal(r.error, null);
+    const g = r.state.gtts[0];
+    assert.equal(g.product, 'MIS');
+    assert.equal(g.exitSide, 'BUY');
+    assert.equal(g.qty, 100);
+    const still = tick(r.state, SBIN, 790, at(MON, '10:30'));
+    assert.equal(still.state.gtts[0].status, 'ACTIVE');
+    const hit = tick(still.state, SBIN, 783, at(MON, '10:45'));
+    assert.equal(hit.state.gtts[0].status, 'TRIGGERED');
+    assert.equal(hit.state.gtts[0].triggeredLeg, 'TARGET');
+    assert.equal(hit.state.positions['SBIN.NS|MIS'].netQty, 0);
+    assert.equal(hit.state.fills[0].realizedPnl, 1700);
+  });
+
+  it('stops out an intraday short when the price rises to the stop', () => {
+    const r = misEntry(fresh(), 'SELL', 800, 808, 784);
+    const hit = tick(r.state, SBIN, 809, at(MON, '11:00'));
+    assert.equal(hit.state.gtts[0].triggeredLeg, 'STOP');
+    assert.equal(hit.state.fills[0].side, 'BUY');
+    assert.equal(hit.state.fills[0].realizedPnl, -900);
+  });
+
+  it('protects an intraday long and ends unfired exits at square-off', () => {
+    const r = misEntry(fresh(), 'BUY', 800, 792, 820);
+    assert.equal(r.state.gtts[0].exitSide, 'SELL');
+    const sq = tick(r.state, SBIN, 805, at(MON, '15:21'));
+    assert.equal(sq.state.positions['SBIN.NS|MIS'].netQty, 0);
+    assert.equal(sq.state.gtts[0].status, 'CANCELLED');
+    assert.match(sq.state.gtts[0].message ?? '', /square-off/);
+  });
+
+  it('validates short brackets the other way round', () => {
+    const r = misEntry(fresh(), 'SELL', 800, 790, 780);
+    assert.match(r.error ?? '', /short, the stop-loss .* must be above/);
+  });
+
+  it('replays a short exit from candles', () => {
+    const r = misEntry(fresh(), 'SELL', 800, 808, 784);
+    const candles = { 'SBIN.NS': [{ t: at(MON, '10:05'), o: 801, h: 810, l: 799, c: 805, v: 1 }] };
+    const out = replayCandles(r.state, candles, at(MON, '10:01'), at(MON, '10:10'), {});
+    assert.equal(out.state.gtts[0].triggeredLeg, 'STOP');
+    assert.equal(out.state.gtts[0].triggerPrice, 808);
+  });
+});

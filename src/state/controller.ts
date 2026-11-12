@@ -57,11 +57,24 @@ class MarketController {
   private appState: AppStateStatus | string = AppState.currentState ?? 'active';
   private focus = new Map<string, { inst: Instrument; count: number }>();
   private started = false;
-  private afterCycle: (() => void) | null = null;
+  private hooks = new Set<() => void>();
+  private extra: (() => Instrument[]) | null = null;
 
-  /** Runs after every successful price refresh (used to start scheduled AI sessions). */
-  setAfterCycle(fn: () => void) {
-    this.afterCycle = fn;
+  /** Runs after every successful price refresh (scheduled AI sessions, Live mode). */
+  addAfterCycle(fn: () => void): () => void {
+    this.hooks.add(fn);
+    return () => {
+      this.hooks.delete(fn);
+    };
+  }
+
+  /** More symbols to keep priced (Live mode's watch list), refreshed at most every 10 s. */
+  setExtraInstruments(fn: (() => Instrument[]) | null) {
+    this.extra = fn;
+  }
+
+  isForeground(): boolean {
+    return this.appState === 'active';
   }
 
   start() {
@@ -141,10 +154,20 @@ class MarketController {
     for (const p of Object.values(s.positions)) background.set(p.instrument.symbol, p.instrument);
     for (const k of priority.keys()) background.delete(k);
 
-    if (isBatchAvailable(now)) return [...priority.values(), ...background.values()];
+    let extras: Instrument[] = [];
+    try {
+      extras = this.extra?.() ?? [];
+    } catch {
+      extras = [];
+    }
+    const extraDue = extras.filter(
+      (i) => !priority.has(i.symbol) && !background.has(i.symbol) && now - (this.lastFetched.get(i.symbol) ?? 0) >= 9_500,
+    );
+    if (isBatchAvailable(now)) return [...priority.values(), ...background.values(), ...extraDue];
     const every = Math.max(15_000, s.settings.refreshSeconds * 3_000);
     const due = [...background.values()].filter((i) => now - (this.lastFetched.get(i.symbol) ?? 0) >= every - 500);
-    return [...priority.values(), ...due];
+    const extraSlow = extraDue.filter((i) => now - (this.lastFetched.get(i.symbol) ?? 0) >= every - 500);
+    return [...priority.values(), ...due, ...extraSlow];
   }
 
   private async fetchOne(inst: Instrument): Promise<Quote | null> {
@@ -178,10 +201,12 @@ class MarketController {
       const now = Date.now();
       commit(processQuotes(engineStore.get(), quoteStore.record(), now));
       engineStore.setMeta({ lastEvalAt: now });
-      try {
-        this.afterCycle?.();
-      } catch {
-        // The hook must never break price refreshes.
+      for (const hook of this.hooks) {
+        try {
+          hook();
+        } catch {
+          // Hooks must never break price refreshes.
+        }
       }
     } catch (e) {
       feedStatusStore.set({ lastError: e instanceof Error ? e.message : 'Refresh failed' });

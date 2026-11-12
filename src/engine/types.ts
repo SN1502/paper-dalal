@@ -141,8 +141,9 @@ export interface Holding {
 }
 
 /**
- * Good-till-triggered exit for a delivery position: sells at market when the price
- * falls to the stop or rises to the target, whichever comes first. Lasts across days.
+ * Stop-loss/target exit. For a long it sells at market when the price falls to the stop or
+ * rises to the target; for an intraday short it buys back when the price rises to the stop
+ * or falls to the target. Delivery exits last across days; intraday exits end at square-off.
  */
 export interface Gtt {
   id: string;
@@ -160,6 +161,10 @@ export interface Gtt {
   triggerPrice: number | null;
   exitOrderId: string | null;
   message: string | null;
+  /** Position the exit protects. Missing on exits saved by older versions: delivery. */
+  product?: Product;
+  /** Order side that closes the position: SELL for a long, BUY for an intraday short. Missing: SELL. */
+  exitSide?: Side;
 }
 
 export interface DayRecord {

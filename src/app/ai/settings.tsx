@@ -1,46 +1,14 @@
 import { useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Switch, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { syncBackgroundTask } from '@/ai/background';
 import { MODELS, verifyKey, type ModelId } from '@/ai/claude';
 import { aiStore, useAi } from '@/ai/store';
 import type { AiSettings } from '@/ai/types';
-import { Button, Card, Divider, Screen, Segmented, TopBar, Txt } from '@/ui/kit';
+import { Button, Card, Divider, Screen, TopBar, Txt } from '@/ui/kit';
+import { Choice, Toggle } from '@/ui/SettingsParts';
 import { ConfirmSheet } from '@/ui/Sheet';
 import { radius, space, typeScale, usePalette } from '@/ui/theme';
-
-type Opt<T extends string> = { value: T; label: string };
-
-function Choice<T extends string>({ label, help, options, value, onChange }: { label: string; help?: string; options: Opt<T>[]; value: T; onChange: (v: T) => void }) {
-  return (
-    <View style={{ gap: space.sm }}>
-      <View>
-        <Txt v="bodyStrong">{label}</Txt>
-        {help ? (
-          <Txt v="small" c="muted">
-            {help}
-          </Txt>
-        ) : null}
-      </View>
-      <Segmented options={options} value={value} onChange={onChange} size="sm" />
-    </View>
-  );
-}
-
-function Toggle({ label, help, value, onChange }: { label: string; help: string; value: boolean; onChange: (v: boolean) => void }) {
-  const p = usePalette();
-  return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Txt v="bodyStrong">{label}</Txt>
-        <Txt v="small" c="muted">
-          {help}
-        </Txt>
-      </View>
-      <Switch value={value} onValueChange={onChange} trackColor={{ true: p.accent, false: p.border }} thumbColor={p.surface} accessibilityLabel={label} />
-    </View>
-  );
-}
 
 /** Rough cost of one session for the cost hint (tokens observed for a typical run). */
 function estimate(model: ModelId, searches: number): string {

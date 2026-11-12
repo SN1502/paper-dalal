@@ -3,7 +3,9 @@ import { ScrollView, StyleSheet, View } from 'react-native';
 
 import { MODELS, type ModelId } from '@/ai/claude';
 import { aiRunner } from '@/ai/runner';
+import { liveTrader } from '@/live/liveTrader';
 import { useAi } from '@/ai/store';
+import { useLive } from '@/live/store';
 import { formatIstDateTime } from '@/lib/time';
 import { DecisionRow, StepRow } from '@/ui/AiParts';
 import { Button, Card, Divider, Empty, KeyValue, Pill, Screen, TopBar, Txt } from '@/ui/kit';
@@ -12,7 +14,13 @@ import { space } from '@/ui/theme';
 export default function RunDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const ai = useAi();
-  const run = ai.running?.id === id ? ai.running : ai.journal.find((r) => r.id === id);
+  const live = useLive();
+  const run =
+    ai.running?.id === id
+      ? ai.running
+      : live.thinking?.id === id
+        ? live.thinking
+        : ai.journal.find((r) => r.id === id) ?? live.runs.find((r) => r.id === id);
 
   if (!run) {
     return (
@@ -24,7 +32,8 @@ export default function RunDetailScreen() {
   }
 
   const minutes = run.finishedAt ? Math.max(1, Math.round((run.finishedAt - run.startedAt) / 60_000)) : null;
-  const trigger = run.trigger === 'manual' ? 'Run by you' : run.trigger === 'background' ? 'Scheduled (background)' : 'Scheduled';
+  const trigger =
+    run.trigger === 'manual' ? 'Run by you' : run.trigger === 'background' ? 'Scheduled (background)' : run.trigger === 'live' ? 'Live decision' : 'Scheduled';
 
   return (
     <Screen>
@@ -54,7 +63,7 @@ export default function RunDetailScreen() {
               {run.error}
             </Txt>
           ) : null}
-          {run.status === 'running' ? <Button label="Stop this session" variant="danger" compact onPress={() => aiRunner.stop()} /> : null}
+          {run.status === 'running' ? <Button label="Stop this session" variant="danger" compact onPress={() => (run.trigger === 'live' ? liveTrader.stopThinking() : aiRunner.stop())} /> : null}
         </Card>
 
         <Card style={{ gap: space.xs }}>

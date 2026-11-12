@@ -496,18 +496,23 @@ export function fillOrder(
   if (product === 'CNC') cash += side === 'BUY' ? -(qty * price) - charges.total : qty * price - charges.total;
   else cash += realized - charges.total;
 
-  if (side === 'BUY' && order.source === 'AI') {
+  // Tag positions the AI opens: delivery and intraday buys, and intraday shorts.
+  if (order.source === 'AI' && (side === 'BUY' || product === 'MIS')) {
     const key = positionKey(inst.symbol, product);
     if (positions[key]) positions = { ...positions, [key]: { ...positions[key], ai: true } };
   }
 
   let gtts = state.gtts;
   let exitNote = '';
-  if (order.bracket && side === 'BUY' && product === 'CNC') {
+  const misNet = product === 'MIS' ? positions[positionKey(inst.symbol, 'MIS')]?.netQty ?? 0 : 0;
+  const opensMis = product === 'MIS' && (side === 'BUY' ? misNet > 0 : misNet < 0);
+  if (order.bracket && ((side === 'BUY' && product === 'CNC') || opensMis)) {
     const g: Gtt = {
       id: newId('G'),
       instrument: inst,
-      qty,
+      qty: product === 'MIS' ? Math.min(qty, Math.abs(misNet)) : qty,
+      product,
+      exitSide: side === 'BUY' ? 'SELL' : 'BUY',
       stopPrice: round2(order.bracket.stopPrice),
       targetPrice: round2(order.bracket.targetPrice),
       status: 'ACTIVE',
@@ -739,15 +744,24 @@ export function placeOrder(state: EngineState, rawInput: OrderInput, ctx: PlaceC
   return { state: s, events, order: findOrder(s, order.id) ?? null, error: null };
 }
 
-/** A bracket is only for delivery buys: stop below the entry, target above it. */
+/**
+ * Brackets attach an automatic exit to an entry: delivery buys and intraday buys need the
+ * stop below and the target above the entry; intraday shorts the reverse.
+ */
 export function validateBracket(input: OrderInput, ltp: number | null): string | null {
   const b = input.bracket;
   if (!b) return null;
-  if (input.product !== 'CNC' || input.side !== 'BUY') return 'Stop-loss and target exits can only be attached to delivery buys.';
+  if (input.product === 'CNC' && input.side !== 'BUY') return 'Stop-loss and target exits can only be attached to delivery buys.';
   if (!(b.stopPrice > 0) || !(b.targetPrice > 0)) return 'Set both a stop-loss and a target price.';
   const entry = input.type === 'LIMIT' && input.price ? input.price : ltp;
-  if (entry !== null && b.stopPrice >= entry) return `Stop-loss (${rupees(b.stopPrice)}) must be below the entry price (${rupees(entry)}).`;
-  if (entry !== null && b.targetPrice <= entry) return `Target (${rupees(b.targetPrice)}) must be above the entry price (${rupees(entry)}).`;
+  if (entry === null) return null;
+  if (input.side === 'BUY') {
+    if (b.stopPrice >= entry) return `Stop-loss (${rupees(b.stopPrice)}) must be below the entry price (${rupees(entry)}).`;
+    if (b.targetPrice <= entry) return `Target (${rupees(b.targetPrice)}) must be above the entry price (${rupees(entry)}).`;
+  } else {
+    if (b.stopPrice <= entry) return `For a short, the stop-loss (${rupees(b.stopPrice)}) must be above the entry price (${rupees(entry)}).`;
+    if (b.targetPrice >= entry) return `For a short, the target (${rupees(b.targetPrice)}) must be below the entry price (${rupees(entry)}).`;
+  }
   return null;
 }
 
@@ -900,7 +914,7 @@ export function squareOffIntraday(
     closed++;
   }
 
-  if (remaining === 0) s = { ...s, squaredOffDay: day };
+  if (remaining === 0) s = cancelIntradayGtts({ ...s, squaredOffDay: day }, time, 'Ended at intraday square-off');
   if (closed > 0 || cancelled > 0) {
     const parts: string[] = [];
     if (closed > 0) parts.push(`${closed} position${closed > 1 ? 's' : ''} closed (P&L ${pnl >= 0 ? '+' : ''}${rupees(pnl)})`);
@@ -969,6 +983,7 @@ export function rolloverTo(state: EngineState, day: string, fallbackPrices: Pric
   s = exp.state;
   events.push(...exp.events);
 
+  s = cancelIntradayGtts(s, closeTime, 'Ended at the day change');
   const holdings: Record<string, Holding> = { ...s.holdings };
   for (const p of Object.values(s.positions)) {
     if (p.product !== 'CNC' || p.netQty <= 0) continue;
@@ -1208,7 +1223,7 @@ export function replayCandles(
         if (c.t < minuteFloor(g.createdAt) + MINUTE) continue;
         const d = gttBarDecision(g, c);
         if (!d) continue;
-        const px = d.leg === 'STOP' ? applySlippage(d.price, 'SELL', s.settings.slippageBps) : round2(d.price);
+        const px = d.leg === 'STOP' ? applySlippage(d.price, gttExitSide(g), s.settings.slippageBps) : round2(d.price);
         const r = triggerGtt(s, g.id, d.leg, px, c.t + 30_000, merged());
         s = r.state;
         events.push(...r.events);
@@ -1231,6 +1246,16 @@ export function heldQty(state: EngineState, symbol: string): number {
   return (state.holdings[symbol]?.qty ?? 0) + Math.max(0, state.positions[positionKey(symbol, 'CNC')]?.netQty ?? 0);
 }
 
+export const gttProduct = (g: Pick<Gtt, 'product'>): Product => g.product ?? 'CNC';
+export const gttExitSide = (g: Pick<Gtt, 'exitSide'>): Side => g.exitSide ?? 'SELL';
+
+/** Quantity an exit can close: delivery shares for a delivery exit, the intraday position for an intraday one. */
+export function coveredQty(state: EngineState, symbol: string, product: Product, exitSide: Side): number {
+  if (product === 'CNC') return exitSide === 'SELL' ? heldQty(state, symbol) : 0;
+  const net = state.positions[positionKey(symbol, 'MIS')]?.netQty ?? 0;
+  return exitSide === 'SELL' ? Math.max(0, net) : Math.max(0, -net);
+}
+
 function patchGtt(state: EngineState, id: string, patch: Partial<Gtt>): EngineState {
   return { ...state, gtts: state.gtts.map((g) => (g.id === id ? { ...g, ...patch } : g)) };
 }
@@ -1241,20 +1266,37 @@ export interface GttInput {
   stopPrice: number | null;
   targetPrice: number | null;
   source: 'USER' | 'AI';
+  /** Defaults to a delivery (CNC) long exit. */
+  product?: Product;
+  exitSide?: Side;
 }
 
 export function validateGtt(state: EngineState, input: Omit<GttInput, 'source'>, ltp: number | null): string | null {
+  const product = input.product ?? 'CNC';
+  const exitSide = input.exitSide ?? 'SELL';
   if (!Number.isInteger(input.qty) || input.qty < 1) return 'Enter a whole number of shares, at least 1.';
-  const held = heldQty(state, input.instrument.symbol);
-  if (input.qty > held) return `You hold ${held} ${input.instrument.tradingSymbol}; the exit can cover at most that.`;
+  const held = coveredQty(state, input.instrument.symbol, product, exitSide);
+  if (input.qty > held) {
+    return product === 'MIS'
+      ? `Your intraday ${exitSide === 'SELL' ? 'long' : 'short'} position in ${input.instrument.tradingSymbol} is ${held}; the exit can cover at most that.`
+      : `You hold ${held} ${input.instrument.tradingSymbol}; the exit can cover at most that.`;
+  }
   if (input.stopPrice === null && input.targetPrice === null) return 'Set a stop-loss, a target, or both.';
   if (input.stopPrice !== null && !(input.stopPrice > 0)) return 'Stop-loss must be above zero.';
-  if (input.stopPrice !== null && input.targetPrice !== null && input.targetPrice <= input.stopPrice)
-    return 'Target must be above the stop-loss.';
-  if (ltp !== null && input.stopPrice !== null && input.stopPrice >= ltp)
-    return `Stop-loss must be below the last price (${rupees(ltp)}).`;
-  if (ltp !== null && input.targetPrice !== null && input.targetPrice <= ltp)
-    return `Target must be above the last price (${rupees(ltp)}).`;
+  if (input.targetPrice !== null && !(input.targetPrice > 0)) return 'Target must be above zero.';
+  const long = exitSide === 'SELL';
+  if (input.stopPrice !== null && input.targetPrice !== null) {
+    if (long && input.targetPrice <= input.stopPrice) return 'Target must be above the stop-loss.';
+    if (!long && input.targetPrice >= input.stopPrice) return 'For a short, the target must be below the stop-loss.';
+  }
+  if (ltp !== null && input.stopPrice !== null) {
+    if (long && input.stopPrice >= ltp) return `Stop-loss must be below the last price (${rupees(ltp)}).`;
+    if (!long && input.stopPrice <= ltp) return `For a short, the stop-loss must be above the last price (${rupees(ltp)}).`;
+  }
+  if (ltp !== null && input.targetPrice !== null) {
+    if (long && input.targetPrice <= ltp) return `Target must be above the last price (${rupees(ltp)}).`;
+    if (!long && input.targetPrice >= ltp) return `For a short, the target must be below the last price (${rupees(ltp)}).`;
+  }
   return null;
 }
 
@@ -1276,6 +1318,8 @@ export function createGtt(state: EngineState, input: GttInput, now: number, ltp:
     triggerPrice: null,
     exitOrderId: null,
     message: null,
+    product: input.product ?? 'CNC',
+    exitSide: input.exitSide ?? 'SELL',
   };
   return { state: { ...state, gtts: [gtt, ...state.gtts] }, gtt, error: null };
 }
@@ -1294,6 +1338,8 @@ export function updateGtt(
     qty: patch.qty ?? g.qty,
     stopPrice: patch.stopPrice !== undefined ? patch.stopPrice : g.stopPrice,
     targetPrice: patch.targetPrice !== undefined ? patch.targetPrice : g.targetPrice,
+    product: gttProduct(g),
+    exitSide: gttExitSide(g),
   };
   const error = validateGtt(state, next, ltp);
   if (error) return { state, error };
@@ -1317,7 +1363,18 @@ export function cancelGtt(state: EngineState, id: string, now: number, reason = 
   };
 }
 
-/** Sells the GTT's quantity at `price` and marks which leg fired. */
+/** Ends every active intraday exit (at square-off or the day change). */
+export function cancelIntradayGtts(state: EngineState, now: number, reason: string): EngineState {
+  if (!state.gtts.some((g) => g.status === 'ACTIVE' && gttProduct(g) === 'MIS')) return state;
+  return {
+    ...state,
+    gtts: state.gtts.map((g) =>
+      g.status === 'ACTIVE' && gttProduct(g) === 'MIS' ? { ...g, status: 'CANCELLED' as const, message: reason, updatedAt: now } : g,
+    ),
+  };
+}
+
+/** Closes the exit's quantity at `price` and marks which leg fired. */
 export function triggerGtt(
   state: EngineState,
   id: string,
@@ -1329,19 +1386,22 @@ export function triggerGtt(
   const g = state.gtts.find((x) => x.id === id);
   if (!g || g.status !== 'ACTIVE') return { state, events: [] };
   const sym = g.instrument.symbol;
-  if (heldQty(state, sym) <= 0) {
+  const product = gttProduct(g);
+  const exitSide = gttExitSide(g);
+  const held = coveredQty(state, sym, product, exitSide);
+  if (held <= 0) {
     return { state: patchGtt(state, id, { status: 'CANCELLED', message: 'Position no longer held', updatedAt: time }), events: [] };
   }
-  const can = sellableQty(state, sym);
-  // Shares are held but already committed to another pending sell; try again later.
+  // A delivery sell can only use shares not already committed to another pending sell.
+  const can = product === 'CNC' ? sellableQty(state, sym) : held;
   if (can <= 0) return { state, events: [] };
   const qty = Math.min(g.qty, can);
   const note = leg === 'STOP' ? 'Stop-loss hit' : 'Target reached';
   const order: Order = {
     id: newId('O'),
     instrument: g.instrument,
-    side: 'SELL',
-    product: 'CNC',
+    side: exitSide,
+    product,
     type: 'MARKET',
     qty,
     price: null,
@@ -1373,7 +1433,15 @@ export function triggerGtt(
   return { state: s, events: r.events };
 }
 
-/** Checks active GTTs against live prices. */
+/** Which leg a live price hits, given the exit's direction. */
+export function gttTickDecision(g: Pick<Gtt, 'stopPrice' | 'targetPrice' | 'exitSide'>, ltp: number): 'STOP' | 'TARGET' | null {
+  const long = gttExitSide(g) === 'SELL';
+  if (g.stopPrice !== null && (long ? ltp <= g.stopPrice : ltp >= g.stopPrice)) return 'STOP';
+  if (g.targetPrice !== null && (long ? ltp >= g.targetPrice : ltp <= g.targetPrice)) return 'TARGET';
+  return null;
+}
+
+/** Checks active exits against live prices. */
 export function processGtts(state: EngineState, quotes: Record<string, Quote>, now: number): EngineResult {
   let s = state;
   const events: EngineEvent[] = [];
@@ -1381,38 +1449,49 @@ export function processGtts(state: EngineState, quotes: Record<string, Quote>, n
   for (const g0 of state.gtts) {
     if (g0.status !== 'ACTIVE') continue;
     const sym = g0.instrument.symbol;
-    if (heldQty(s, sym) <= 0) {
+    if (coveredQty(s, sym, gttProduct(g0), gttExitSide(g0)) <= 0) {
       s = patchGtt(s, g0.id, { status: 'CANCELLED', message: 'Position no longer held', updatedAt: now });
       continue;
     }
     const q = quotes[sym];
     if (!q || !isLiveQuote(q, now)) continue;
-    let r: EngineResult | null = null;
-    if (g0.stopPrice !== null && q.ltp <= g0.stopPrice) {
-      r = triggerGtt(s, g0.id, 'STOP', applySlippage(q.ltp, 'SELL', s.settings.slippageBps), now, prices);
-    } else if (g0.targetPrice !== null && q.ltp >= g0.targetPrice) {
-      r = triggerGtt(s, g0.id, 'TARGET', round2(q.ltp), now, prices);
-    }
-    if (r) {
-      s = r.state;
-      events.push(...r.events);
-    }
+    const leg = gttTickDecision(g0, q.ltp);
+    if (!leg) continue;
+    const px = leg === 'STOP' ? applySlippage(q.ltp, gttExitSide(g0), s.settings.slippageBps) : round2(q.ltp);
+    const r = triggerGtt(s, g0.id, leg, px, now, prices);
+    s = r.state;
+    events.push(...r.events);
   }
   return { state: s, events };
 }
 
-/** Which GTT leg a 1-minute candle hits; when both, the open decides, else the stop (conservative). */
-export function gttBarDecision(g: Pick<Gtt, 'stopPrice' | 'targetPrice'>, c: Bar): { leg: 'STOP' | 'TARGET'; price: number } | null {
-  const stopHit = g.stopPrice !== null && c.l <= g.stopPrice;
-  const targetHit = g.targetPrice !== null && c.h >= g.targetPrice;
+/**
+ * Which exit leg a 1-minute candle hits; when both, the open decides, else the stop (conservative).
+ * Long exits stop on the low and take profit on the high; short exits the reverse.
+ */
+export function gttBarDecision(
+  g: Pick<Gtt, 'stopPrice' | 'targetPrice' | 'exitSide'>,
+  c: Bar,
+): { leg: 'STOP' | 'TARGET'; price: number } | null {
+  if (gttExitSide(g) === 'SELL') {
+    const stopHit = g.stopPrice !== null && c.l <= g.stopPrice;
+    const targetHit = g.targetPrice !== null && c.h >= g.targetPrice;
+    if (!stopHit && !targetHit) return null;
+    if (stopHit && targetHit && g.targetPrice !== null && c.o >= g.targetPrice) return { leg: 'TARGET', price: c.o };
+    if (stopHit) return { leg: 'STOP', price: Math.min(g.stopPrice as number, c.o) };
+    return { leg: 'TARGET', price: Math.max(g.targetPrice as number, c.o) };
+  }
+  const stopHit = g.stopPrice !== null && c.h >= g.stopPrice;
+  const targetHit = g.targetPrice !== null && c.l <= g.targetPrice;
   if (!stopHit && !targetHit) return null;
-  if (stopHit && targetHit && g.targetPrice !== null && c.o >= g.targetPrice) return { leg: 'TARGET', price: c.o };
-  if (stopHit) return { leg: 'STOP', price: Math.min(g.stopPrice as number, c.o) };
-  return { leg: 'TARGET', price: Math.max(g.targetPrice as number, c.o) };
+  if (stopHit && targetHit && g.targetPrice !== null && c.o <= g.targetPrice) return { leg: 'TARGET', price: c.o };
+  if (stopHit) return { leg: 'STOP', price: Math.max(g.stopPrice as number, c.o) };
+  return { leg: 'TARGET', price: Math.min(g.targetPrice as number, c.o) };
 }
 
-export function activeGttFor(state: EngineState, symbol: string): Gtt[] {
-  return state.gtts.filter((g) => g.status === 'ACTIVE' && g.instrument.symbol === symbol);
+/** Active exits for a symbol, optionally only for one product. */
+export function activeGttFor(state: EngineState, symbol: string, product?: Product): Gtt[] {
+  return state.gtts.filter((g) => g.status === 'ACTIVE' && g.instrument.symbol === symbol && (!product || gttProduct(g) === product));
 }
 
 export type { Bracket };

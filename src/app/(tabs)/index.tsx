@@ -10,6 +10,7 @@ import { controller } from '@/state/controller';
 import { useEngine } from '@/state/engineStore';
 import { useQuote, useQuotes } from '@/state/quoteStore';
 import { Divider, Empty, Screen, Txt } from '@/ui/kit';
+import { LiveBadge } from '@/ui/LiveParts';
 import { FeedLine, MarketPill } from '@/ui/MarketPill';
 import { useNav } from '@/ui/nav';
 import { Change, DayRange, LivePrice, changeOf } from '@/ui/Price';
@@ -121,7 +122,10 @@ export default function MarketsScreen() {
           <Txt v="title">PaperDalal</Txt>
           <FeedLine />
         </View>
-        <MarketPill />
+        <View style={{ alignItems: 'flex-end', gap: 6 }}>
+          <MarketPill />
+          <LiveBadge />
+        </View>
       </View>
       <View style={styles.indexRow}>
         {INDICES.map((i) => (

@@ -5,7 +5,7 @@
 import { newId } from '../lib/format';
 import { formatDayKey, formatIstTime, istDayKey, istParts } from '../lib/time';
 import { ClaudeError, MODELS, costOf, createMessage, type ContentBlock, type Message, type ModelId } from './claude';
-import { CLIENT_TOOLS, SessionTools, isClientTool, type AgentEnv } from './tools';
+import { CLIENT_TOOLS, SessionTools, type AgentEnv } from './tools';
 import { EMPTY_USAGE, type AiRun, type AiSettings, type AiStep, type RunTrigger } from './types';
 
 const MAX_REQUESTS = 30;
@@ -79,11 +79,33 @@ export interface RunOptions {
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
   onUpdate?: (run: AiRun) => void;
+  /** Overrides for runs other than the scheduled research session (e.g. live decisions). */
+  mode?: AgentMode;
+}
+
+export interface AgentMode {
+  model: ModelId;
+  system: string;
+  user: string;
+  /** Client tool definitions offered to Claude (server tools are added from the limits below). */
+  clientTools: readonly unknown[];
+  makeExecutor: (addStep: (step: AiStep) => void) => SessionTools;
+  maxRequests: number;
+  maxTokens: number;
+  maxSearches: number;
+  maxFetches: number;
+  costCapUsd: number;
 }
 
 export async function runAgent(o: RunOptions): Promise<AiRun> {
   const now = o.env.now();
-  const model: ModelId = o.settings.model in MODELS ? o.settings.model : 'claude-sonnet-5-5';
+  const wanted = o.mode?.model ?? o.settings.model;
+  const model: ModelId = wanted in MODELS ? wanted : 'claude-sonnet-5-5';
+  const maxRequests = o.mode?.maxRequests ?? MAX_REQUESTS;
+  const maxTokens = o.mode?.maxTokens ?? MAX_TOKENS;
+  const costCap = o.mode?.costCapUsd ?? o.settings.perRunCapUsd;
+  const searches = o.mode?.maxSearches ?? Math.max(1, Math.round(o.settings.maxSearches));
+  const fetches = o.mode?.maxFetches ?? Math.max(2, Math.ceil(o.settings.maxSearches / 2));
   const run: AiRun = {
     id: newId('R'),
     trigger: o.trigger,
@@ -108,31 +130,38 @@ export async function runAgent(o: RunOptions): Promise<AiRun> {
     publish();
   };
 
-  const tools = new SessionTools(o.env, o.settings, addStep);
+  const tools = o.mode ? o.mode.makeExecutor(addStep) : new SessionTools(o.env, o.settings, addStep);
+  const clientTools = (o.mode?.clientTools ?? CLIENT_TOOLS) as readonly { name: string }[];
+  const clientNames = new Set(clientTools.map((t) => t.name));
   const toolDefs = [
-    {
-      type: 'web_search_20250305',
-      name: 'web_search',
-      max_uses: Math.max(1, Math.round(o.settings.maxSearches)),
-      user_location: { type: 'approximate', country: 'IN', timezone: 'Asia/Kolkata' },
-    },
-    {
-      type: 'web_fetch_20250910',
-      name: 'web_fetch',
-      max_uses: Math.max(2, Math.ceil(o.settings.maxSearches / 2)),
-      max_content_tokens: 12_000,
-    },
-    ...CLIENT_TOOLS,
+    ...(searches > 0
+      ? [
+          {
+            type: 'web_search_20250305',
+            name: 'web_search',
+            max_uses: searches,
+            user_location: { type: 'approximate', country: 'IN', timezone: 'Asia/Kolkata' },
+          },
+        ]
+      : []),
+    ...(fetches > 0 ? [{ type: 'web_fetch_20250910', name: 'web_fetch', max_uses: fetches, max_content_tokens: 12_000 }] : []),
+    ...clientTools,
   ] as unknown as ContentBlock[];
   const system: ContentBlock[] = [
-    { type: 'text', text: buildSystemPrompt(o.settings, now, o.env.marketStatus()), cache_control: { type: 'ephemeral' } },
+    {
+      type: 'text',
+      text: o.mode?.system ?? buildSystemPrompt(o.settings, now, o.env.marketStatus()),
+      cache_control: { type: 'ephemeral' },
+    },
   ];
-  const messages: Message[] = [{ role: 'user', content: [{ type: 'text', text: buildUserPrompt(o.trigger, o.slot, o.previous) }] }];
+  const messages: Message[] = [
+    { role: 'user', content: [{ type: 'text', text: o.mode?.user ?? buildUserPrompt(o.trigger, o.slot, o.previous) }] },
+  ];
   addStep({ t: now, kind: 'note', text: `Started with ${MODELS[model].label}` });
 
   let finalText = '';
   try {
-    for (let i = 0; i < MAX_REQUESTS; i++) {
+    for (let i = 0; i < maxRequests; i++) {
       if (o.signal?.aborted) {
         run.status = 'stopped';
         addStep({ t: o.env.now(), kind: 'note', text: 'Stopped by you' });
@@ -141,7 +170,7 @@ export async function runAgent(o: RunOptions): Promise<AiRun> {
       let res;
       try {
         res = await createMessage(
-          { model, max_tokens: MAX_TOKENS, system, tools: toolDefs, messages },
+          { model, max_tokens: maxTokens, system, tools: toolDefs, messages },
           { apiKey: o.apiKey, fetchImpl: o.fetchImpl, signal: o.signal },
         );
       } catch (e) {
@@ -180,7 +209,7 @@ export async function runAgent(o: RunOptions): Promise<AiRun> {
           finalText = block.text.trim();
         } else if (block.type === 'tool_use' && res.stop_reason === 'tool_use') {
           const name = String(block.name);
-          const out = isClientTool(name)
+          const out = clientNames.has(name)
             ? await tools.execute(name, (block.input ?? {}) as Record<string, unknown>)
             : { content: JSON.stringify({ error: `Unknown tool ${name}` }), isError: true };
           results.push({ type: 'tool_result', tool_use_id: block.id, content: out.content, ...(out.isError ? { is_error: true } : {}) });
@@ -191,8 +220,8 @@ export async function runAgent(o: RunOptions): Promise<AiRun> {
       if (res.stop_reason === 'pause_turn') continue;
       if (res.stop_reason === 'tool_use') {
         if (tools.finished) break;
-        if (run.usage.costUsd >= o.settings.perRunCapUsd) {
-          addStep({ t: o.env.now(), kind: 'note', text: `Stopped at the $${o.settings.perRunCapUsd.toFixed(2)} per-run cost cap` });
+        if (run.usage.costUsd >= costCap) {
+          addStep({ t: o.env.now(), kind: 'note', text: `Stopped at the $${costCap.toFixed(2)} per-run cost cap` });
           break;
         }
         messages.push({ role: 'user', content: results });

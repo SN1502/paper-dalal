@@ -4,6 +4,7 @@ import { getFatalError, onFatalError } from '@/crashGuard';
 import { syncBackgroundTask } from '@/ai/background';
 import { aiRunner } from '@/ai/runner';
 import { aiStore } from '@/ai/store';
+import { liveTrader } from '@/live/liveTrader';
 import { controller } from '@/state/controller';
 import { Stack, type ErrorBoundaryProps } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -42,7 +43,8 @@ export default function RootLayout() {
     bootstrap()
       .then(() => {
         try {
-          controller.setAfterCycle(() => void aiRunner.maybeAutoRun('auto'));
+          controller.addAfterCycle(() => void aiRunner.maybeAutoRun('auto'));
+          liveTrader.start();
           const ai = aiStore.get();
           void syncBackgroundTask(ai.settings.enabled && ai.hasKey);
         } catch (e) {
@@ -86,6 +88,8 @@ export default function RootLayout() {
           <Stack.Screen name="ai/settings" />
           <Stack.Screen name="ai/signals" />
           <Stack.Screen name="ai/run/[id]" />
+          <Stack.Screen name="ai/live" />
+          <Stack.Screen name="ai/live-settings" />
         </Stack>
       ) : (
         <View style={{ flex: 1, backgroundColor: p.bg, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 }}>

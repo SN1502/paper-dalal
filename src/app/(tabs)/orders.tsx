@@ -164,6 +164,7 @@ function GttRow({ g, onEdit, onCancel }: { g: Gtt; onEdit: () => void; onCancel:
             × {g.qty}
           </Txt>
           <Pill label={g.source === 'AI' ? 'AI' : 'You'} tone={g.source === 'AI' ? 'accent' : 'neutral'} />
+          <Pill label={(g.product ?? 'CNC') === 'MIS' ? (g.exitSide === 'BUY' ? 'Intraday short' : 'Intraday') : 'Delivery'} tone={(g.product ?? 'CNC') === 'MIS' ? 'warn' : 'neutral'} />
           {!active ? (
             <Pill
               label={g.status === 'TRIGGERED' ? (g.triggeredLeg === 'STOP' ? 'Stop hit' : 'Target hit') : 'Cancelled'}
@@ -174,11 +175,11 @@ function GttRow({ g, onEdit, onCancel }: { g: Gtt; onEdit: () => void; onCancel:
         <Txt v="small" c="muted" num>
           SL {g.stopPrice !== null ? rupees(g.stopPrice) : '—'}
           {active && toStop !== null ? ` (${toStop.toFixed(1)}%)` : ''} · Target {g.targetPrice !== null ? rupees(g.targetPrice) : '—'}
-          {active && toTarget !== null ? ` (+${toTarget.toFixed(1)}%)` : ''}
+          {active && toTarget !== null ? ` (${toTarget >= 0 ? '+' : ''}${toTarget.toFixed(1)}%)` : ''}
         </Txt>
         {!active && g.triggerPrice !== null ? (
           <Txt v="small" c="faint" num>
-            Sold at {rupees(g.triggerPrice)} · {formatDayKey(istDayKey(g.updatedAt))}
+            {g.exitSide === 'BUY' ? 'Bought back' : 'Sold'} at {rupees(g.triggerPrice)} · {formatDayKey(istDayKey(g.updatedAt))}
           </Txt>
         ) : null}
         {!active && g.status === 'CANCELLED' && g.message ? (
@@ -276,7 +277,7 @@ export default function OrdersScreen() {
             <Empty
               icon="shield-checkmark-outline"
               title="No exits set"
-              body="Stop-loss and target exits on delivery holdings appear here. The AI sets one on every buy; you can add your own from a stock’s page."
+              body="Stop-loss and target exits appear here. The AI sets one on every trade it opens; you can add your own to delivery holdings from a stock’s page."
             />
           ) : tab === 'history' ? (
             <Empty icon="time-outline" title="No order history yet" body="Executed, cancelled and rejected orders appear here." />
